@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "accounts",
     "commands",
+    "home_tab",
 ]
 
 MIDDLEWARE = [
@@ -84,6 +85,11 @@ SLACK_SCOPES = config("SLACK_SCOPES", default="openid,email,profile")
 # Used to verify that a slash-command request really came from Slack.
 # Find it in api.slack.com/apps -> your app -> Basic Information -> Signing Secret.
 SLACK_SIGNING_SECRET = config("SLACK_SIGNING_SECRET", default="")
+
+# Bot token used to actively call Slack's API (e.g. publish the Home tab).
+# Find it in api.slack.com/apps -> your app -> OAuth & Permissions ->
+# "Bot User OAuth Token" (starts with xoxb-). Different from SLACK_CLIENT_SECRET.
+SLACK_BOT_TOKEN = config("SLACK_BOT_TOKEN", default="")
 
 # --- Microsoft Teams (Azure AD) OAuth ---
 TEAMS_CLIENT_ID = config("TEAMS_CLIENT_ID", default="")
