@@ -3,10 +3,21 @@ The actual logic behind each /testmyplan subcommand.
 
 These return plain dicts shaped like Slack's "message" response format
 (https://api.slack.com/interactivity/slash-commands#responding_immediate_response).
-They're stubbed with placeholder data for now -- the real Exercise/Drill
-models (from the tracker's "Exercise orchestration" domain) aren't built
-yet, so wire these up to real queries once those exist.
+
+`run`, `status`, `pause` and `abort` are wired to a real Exercise record and
+a real auto-provisioned Slack channel (A6). `gaps` and `plans` are still
+stubbed -- they depend on the Plan intake & intelligence domain (B1-B9),
+which isn't built yet.
 """
+
+from exercises.models import (
+    STATUS_ABORTED,
+    STATUS_COMPLETED,
+    STATUS_PAUSED,
+    STATUS_RUNNING,
+    Exercise,
+)
+from exercises.slack_channels import SlackApiError, archive_exercise_channel, provision_exercise_channel
 
 SUPPORTED_SUBCOMMANDS = ["run", "status", "gaps", "plans", "pause", "abort"]
 
@@ -16,23 +27,51 @@ def _ephemeral(text):
     return {"response_type": "ephemeral", "text": text}
 
 
+def _active_exercise_for(user_id):
+    return Exercise.objects(
+        started_by_slack_user_id=user_id, status__in=[STATUS_RUNNING, STATUS_PAUSED]
+    ).first()
+
+
 def handle_run(args, user_id):
-    # TODO: look up the requested scenario, provision the exercise channel,
-    # start the exercise state machine (Exercise orchestration domain, D1-D14).
-    scenario = args or "a default scenario"
+    if _active_exercise_for(user_id):
+        return _ephemeral(
+            "*You already have an exercise running.* Use `/testmyplan status` "
+            "to check it or `/testmyplan abort` to end it first."
+        )
+
+    scenario = args or "Unnamed scenario"
+    exercise = Exercise(scenario_name=scenario, started_by_slack_user_id=user_id)
+
+    try:
+        channel = provision_exercise_channel(scenario, user_id)
+    except SlackApiError as exc:
+        return _ephemeral(
+            f":warning: Couldn't create the exercise channel ({exc}). "
+            "Check the bot has the `channels:manage` and `chat:write` scopes."
+        )
+
+    exercise.slack_channel_id = channel["id"]
+    exercise.slack_channel_name = channel["name"]
+    exercise.save()
+
     return _ephemeral(
-        f":rocket: Starting exercise *{scenario}*... "
-        "(this will provision a channel and invite participants once "
-        "exercise orchestration is built)."
+        f":rocket: Started exercise *{scenario}* in <#{channel['id']}|{channel['name']}>."
     )
 
 
 def handle_status(args, user_id):
-    # TODO: query the active Exercise for this workspace/user and report
-    # real progress instead of this placeholder.
+    exercise = _active_exercise_for(user_id)
+    if exercise is None:
+        return _ephemeral("*No exercise currently running.*")
+
+    channel_ref = (
+        f"<#{exercise.slack_channel_id}|{exercise.slack_channel_name}>"
+        if exercise.slack_channel_id
+        else "(no channel)"
+    )
     return _ephemeral(
-        "*No exercise currently running.* Once exercises are wired up, "
-        "this will show the live status of anything in progress."
+        f"*{exercise.scenario_name}* -- status: `{exercise.status}` -- {channel_ref}"
     )
 
 
@@ -54,13 +93,29 @@ def handle_plans(args, user_id):
 
 
 def handle_pause(args, user_id):
-    # TODO: pause the active exercise (D7 in-chat facilitator console).
-    return _ephemeral("*No running exercise to pause.*")
+    exercise = _active_exercise_for(user_id)
+    if exercise is None:
+        return _ephemeral("*No running exercise to pause.*")
+
+    exercise.status = STATUS_PAUSED
+    exercise.save()
+    return _ephemeral(f"*{exercise.scenario_name}* paused.")
 
 
 def handle_abort(args, user_id):
-    # TODO: abort + stand-down (D14).
-    return _ephemeral("*No running exercise to abort.*")
+    exercise = _active_exercise_for(user_id)
+    if exercise is None:
+        return _ephemeral("*No running exercise to abort.*")
+
+    if exercise.slack_channel_id:
+        try:
+            archive_exercise_channel(exercise.slack_channel_id)
+        except SlackApiError:
+            pass  # still mark it aborted even if archiving the channel failed
+
+    exercise.status = STATUS_ABORTED
+    exercise.save()
+    return _ephemeral(f":octagonal_sign: *{exercise.scenario_name}* aborted and stood down.")
 
 
 _HANDLERS = {
