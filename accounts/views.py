@@ -11,6 +11,19 @@ from rest_framework.response import Response
 
 from .models import SlackAccount, TeamsAccount, User
 
+
+def _get_or_create_user(email, name=""):
+    """
+    mongoengine's QuerySet doesn't support Django's get_or_create(), so do
+    the equivalent by hand: look the user up by email, create if missing.
+    """
+    user = User.objects(email=email).first()
+    if user is None:
+        user = User(email=email, name=name)
+        user.save()
+    return user
+
+
 # ---------------------------------------------------------------------------
 # Slack OAuth
 # ---------------------------------------------------------------------------
@@ -82,9 +95,7 @@ def slack_callback(request):
     if not email:
         return _redirect_to_frontend(error="slack_email_missing")
 
-    user, _created = User.objects.get_or_create(
-        email=email, defaults={"name": userinfo.get("name", "")}
-    )
+    user = _get_or_create_user(email, userinfo.get("name", ""))
     user.name = user.name or userinfo.get("name", "")
     user.avatar_url = userinfo.get("picture", user.avatar_url)
     user.slack_account = SlackAccount(
@@ -185,9 +196,7 @@ def teams_callback(request):
     if not email:
         return _redirect_to_frontend(error="teams_email_missing")
 
-    user, _created = User.objects.get_or_create(
-        email=email, defaults={"name": userinfo.get("name", "")}
-    )
+    user = _get_or_create_user(email, userinfo.get("name", ""))
     user.name = user.name or userinfo.get("name", "")
     user.teams_account = TeamsAccount(
         aad_object_id=userinfo.get("sub", ""),
