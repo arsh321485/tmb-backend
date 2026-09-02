@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "accounts",
+    "commands",
 ]
 
 MIDDLEWARE = [
@@ -80,6 +81,9 @@ SLACK_REDIRECT_URI = config(
     "SLACK_REDIRECT_URI", default=f"{BACKEND_URL}/api/auth/slack/callback/"
 )
 SLACK_SCOPES = config("SLACK_SCOPES", default="openid,email,profile")
+# Used to verify that a slash-command request really came from Slack.
+# Find it in api.slack.com/apps -> your app -> Basic Information -> Signing Secret.
+SLACK_SIGNING_SECRET = config("SLACK_SIGNING_SECRET", default="")
 
 # --- Microsoft Teams (Azure AD) OAuth ---
 TEAMS_CLIENT_ID = config("TEAMS_CLIENT_ID", default="")
