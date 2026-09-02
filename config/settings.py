@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "commands",
     "home_tab",
     "exercises",
+    "plans",
 ]
 
 MIDDLEWARE = [

@@ -7,6 +7,7 @@ from django.views.decorators.http import require_POST
 
 from accounts.models import User
 from commands.slack_signature import SlackSignatureError, verify_slack_signature
+from plans.intake import handle_dm_message_event
 
 from .slack_client import SlackApiError, publish_home_view
 from .view_builder import build_home_view
@@ -19,8 +20,9 @@ logger = logging.getLogger(__name__)
 def slack_events(request):
     """
     Request URL for Slack's Events API, set in the Slack app under Event
-    Subscriptions, subscribed to the `app_home_opened` bot event. Slack
-    POSTs a JSON body here for every subscribed event.
+    Subscriptions. Slack only allows one Request URL per app, so every
+    subscribed event type (app_home_opened, message.im, ...) is routed
+    from here rather than one endpoint per feature.
     """
     try:
         verify_slack_signature(request)
@@ -38,8 +40,17 @@ def slack_events(request):
 
     if payload.get("type") == "event_callback":
         event = payload.get("event", {})
+
         if event.get("type") == "app_home_opened" and event.get("tab") == "home":
             _handle_app_home_opened(event)
+
+        elif (
+            event.get("type") == "message"
+            and event.get("channel_type") == "im"
+            and "bot_id" not in event
+            and event.get("subtype") != "bot_message"
+        ):
+            handle_dm_message_event(event)
 
     # Slack only cares that we returned 200 quickly; the real work above
     # is fire-and-forget from its point of view.
