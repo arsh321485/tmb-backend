@@ -30,7 +30,11 @@ class Plan(me.Document):
 
     version = me.IntField(default=1)
     status = me.StringField(choices=STATUS_CHOICES, default=STATUS_UPLOADED)
-    parsed_summary = me.StringField(required=False)  # filled in once B2 exists
+    # Raw text pulled out of the file (plans/parsing.py). Structured
+    # extraction (roles, RTO/RPO, escalation paths...) is still TODO --
+    # this is just the text for that future step to run against.
+    extracted_text = me.StringField(required=False)
+    parse_error = me.StringField(required=False)
 
     created_at = me.DateTimeField(default=datetime.datetime.utcnow)
 

@@ -9,7 +9,8 @@ import logging
 import requests
 from django.conf import settings
 
-from .models import ALLOWED_EXTENSIONS, Plan
+from .models import ALLOWED_EXTENSIONS, STATUS_FAILED, STATUS_PARSED, Plan
+from .parsing import PlanParsingError, extract_text
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +85,33 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
         slack_channel_id=channel_id,
     )
     plan.file_data.put(resp.content, content_type=slack_file.get("mimetype", ""))
+
+    try:
+        plan.extracted_text = extract_text(resp.content, extension)
+        plan.status = STATUS_PARSED
+    except PlanParsingError as exc:
+        plan.status = STATUS_FAILED
+        plan.parse_error = str(exc)
+    except Exception:
+        logger.exception("Unexpected error extracting text from %s", filename)
+        plan.status = STATUS_FAILED
+        plan.parse_error = "Unexpected error while reading the file."
+
     plan.save()
 
-    _post_message(
-        channel_id,
-        f":inbox_tray: Got it -- *{filename}* uploaded and saved. "
-        "Plan parsing (roles, triggers, RTO/RPO, escalation paths) isn't "
-        "wired up yet, so this is stored as-is for now.",
-    )
+    if plan.status == STATUS_PARSED:
+        word_count = len(plan.extracted_text.split())
+        _post_message(
+            channel_id,
+            f":inbox_tray: Got it -- *{filename}* uploaded and its text "
+            f"extracted (~{word_count} words). Structured analysis (roles, "
+            "triggers, RTO/RPO, escalation paths) isn't wired up yet, but "
+            "the content is ready for that once it is.",
+        )
+    else:
+        _post_message(
+            channel_id,
+            f":inbox_tray: Got it -- *{filename}* uploaded and saved, but "
+            f"I couldn't read its text ({plan.parse_error}). The file is "
+            "still stored.",
+        )
