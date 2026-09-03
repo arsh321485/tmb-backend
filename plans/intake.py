@@ -9,6 +9,7 @@ import logging
 import requests
 from django.conf import settings
 
+from .contact_freshness import check_contacts, gaps_from_contact_checks
 from .models import ALLOWED_EXTENSIONS, STATUS_FAILED, STATUS_PARSED, Plan
 from .parsing import PlanParsingError, extract_text
 from .gap_review import find_gaps
@@ -114,7 +115,10 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
     try:
         plan.extracted_text = extract_text(resp.content, extension)
         plan.structured_data = extract_structured_fields(plan.extracted_text)
-        plan.gaps = find_gaps(plan.structured_data)
+        plan.contact_checks = check_contacts(plan.structured_data.get("emails") or [])
+        plan.gaps = find_gaps(plan.structured_data) + gaps_from_contact_checks(
+            plan.contact_checks
+        )
         plan.status = STATUS_PARSED
     except PlanParsingError as exc:
         plan.status = STATUS_FAILED

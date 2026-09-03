@@ -47,6 +47,9 @@ class Plan(me.Document):
     structured_data = me.DictField(required=False)
     # [{"code": ..., "message": ...}, ...] -- see plans/gap_review.py (B4).
     gaps = me.ListField(me.DictField(), default=list)
+    # [{"email": ..., "status": ..., "display_name": ...}, ...] -- see
+    # plans/contact_freshness.py (B5). status: active/deactivated/not_found/unknown.
+    contact_checks = me.ListField(me.DictField(), default=list)
 
     created_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
