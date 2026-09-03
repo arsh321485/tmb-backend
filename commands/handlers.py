@@ -18,6 +18,7 @@ from exercises.models import (
 )
 from exercises.slack_channels import SlackApiError, archive_exercise_channel, provision_exercise_channel
 from plans.models import Plan
+from plans.scenario_mapping import map_plan_coverage
 
 SUPPORTED_SUBCOMMANDS = ["run", "status", "gaps", "plans", "pause", "abort"]
 
@@ -102,10 +103,20 @@ def handle_plans(args, user_id, channel_id):
             "file into a DM with the app to add one."
         )
 
-    lines = [
-        f"*{p.filename}* -- v{p.version}, status: `{p.status}`, {len(p.gaps)} gap(s)"
-        for p in plans
-    ]
+    lines = []
+    for p in plans:
+        coverage = map_plan_coverage(p)
+        tested_count = len(coverage["tested_sections"])
+        total_sections = tested_count + len(coverage["untested_sections"])
+        coverage_note = (
+            f", {tested_count}/{total_sections} section(s) exercised by a drill so far"
+            if total_sections
+            else ""
+        )
+        lines.append(
+            f"*{p.filename}* -- v{p.version}, status: `{p.status}`, "
+            f"{len(p.gaps)} gap(s){coverage_note}"
+        )
     return _ephemeral("\n".join(lines))
 
 
