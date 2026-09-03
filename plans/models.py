@@ -28,7 +28,13 @@ class Plan(me.Document):
     slack_team_id = me.StringField(required=False)
     slack_channel_id = me.StringField(required=False)
 
+    # B8: plan versioning. Re-uploading a file with the same name in the
+    # same channel is treated as a new version of the same plan, not an
+    # unrelated document -- see plans/versioning.py.
     version = me.IntField(default=1)
+    is_latest = me.BooleanField(default=True)
+    superseded_at = me.DateTimeField(required=False)
+
     status = me.StringField(choices=STATUS_CHOICES, default=STATUS_UPLOADED)
     # Raw text pulled out of the file (plans/parsing.py). Structured
     # extraction (roles, RTO/RPO, escalation paths...) is still TODO --

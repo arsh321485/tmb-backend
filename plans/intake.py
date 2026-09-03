@@ -12,6 +12,7 @@ from django.conf import settings
 from .models import ALLOWED_EXTENSIONS, STATUS_FAILED, STATUS_PARSED, Plan
 from .parsing import PlanParsingError, extract_text
 from .structured_extraction import extract_structured_fields
+from .versioning import assign_version
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
         slack_channel_id=channel_id,
     )
     plan.file_data.put(resp.content, content_type=slack_file.get("mimetype", ""))
+    is_new_version = assign_version(plan)
 
     try:
         plan.extracted_text = extract_text(resp.content, extension)
@@ -122,12 +124,20 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
 
     plan.save()
 
+    version_note = (
+        f" This is *version {plan.version}* -- since the plan changed, "
+        "a re-test is recommended once exercises are wired up to plans."
+        if is_new_version
+        else ""
+    )
+
     if plan.status == STATUS_PARSED:
         word_count = len(plan.extracted_text.split())
         _post_message(
             channel_id,
             f":inbox_tray: Got it -- *{filename}* uploaded and parsed "
-            f"(~{word_count} words). {_summarize(plan.structured_data)}",
+            f"(~{word_count} words). {_summarize(plan.structured_data)}"
+            f"{version_note}",
         )
     else:
         _post_message(
