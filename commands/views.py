@@ -23,8 +23,9 @@ def slack_command(request):
 
     command_text = request.POST.get("text", "")
     user_id = request.POST.get("user_id", "")
+    channel_id = request.POST.get("channel_id", "")
 
-    result = dispatch(command_text, user_id)
+    result = dispatch(command_text, user_id, channel_id)
     return JsonResponse(result)
 
 
@@ -50,5 +51,6 @@ def teams_command(request):
             text = text.strip()[len(prefix):]
             break
 
-    result = dispatch(text, body.get("from", {}).get("id", ""))
+    channel_id = body.get("conversation", {}).get("id", "")
+    result = dispatch(text, body.get("from", {}).get("id", ""), channel_id)
     return JsonResponse({"type": "message", "text": result["text"]})

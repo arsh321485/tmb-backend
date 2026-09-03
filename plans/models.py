@@ -45,6 +45,8 @@ class Plan(me.Document):
     # -- see plans/structured_extraction.py. Roles/triggers/escalation paths
     # as real structured data are still open; this is pattern-matching, not NLP.
     structured_data = me.DictField(required=False)
+    # [{"code": ..., "message": ...}, ...] -- see plans/gap_review.py (B4).
+    gaps = me.ListField(me.DictField(), default=list)
 
     created_at = me.DateTimeField(default=datetime.datetime.utcnow)
 

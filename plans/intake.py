@@ -11,6 +11,7 @@ from django.conf import settings
 
 from .models import ALLOWED_EXTENSIONS, STATUS_FAILED, STATUS_PARSED, Plan
 from .parsing import PlanParsingError, extract_text
+from .gap_review import find_gaps
 from .structured_extraction import extract_structured_fields
 from .versioning import assign_version
 
@@ -113,6 +114,7 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
     try:
         plan.extracted_text = extract_text(resp.content, extension)
         plan.structured_data = extract_structured_fields(plan.extracted_text)
+        plan.gaps = find_gaps(plan.structured_data)
         plan.status = STATUS_PARSED
     except PlanParsingError as exc:
         plan.status = STATUS_FAILED
@@ -133,11 +135,16 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
 
     if plan.status == STATUS_PARSED:
         word_count = len(plan.extracted_text.split())
+        gap_note = (
+            f" :warning: {len(plan.gaps)} gap(s) found -- run `/testmyplan gaps` for details."
+            if plan.gaps
+            else " :white_check_mark: No gaps found by the automatic checks."
+        )
         _post_message(
             channel_id,
             f":inbox_tray: Got it -- *{filename}* uploaded and parsed "
             f"(~{word_count} words). {_summarize(plan.structured_data)}"
-            f"{version_note}",
+            f"{version_note}{gap_note}",
         )
     else:
         _post_message(

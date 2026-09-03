@@ -4,10 +4,9 @@ The actual logic behind each /testmyplan subcommand.
 These return plain dicts shaped like Slack's "message" response format
 (https://api.slack.com/interactivity/slash-commands#responding_immediate_response).
 
-`run`, `status`, `pause` and `abort` are wired to a real Exercise record and
-a real auto-provisioned Slack channel (A6). `gaps` and `plans` are still
-stubbed -- they depend on the Plan intake & intelligence domain (B1-B9),
-which isn't built yet.
+`run`, `status`, `pause` and `abort` operate on a real Exercise record and
+a real auto-provisioned Slack channel (A6). `gaps` and `plans` operate on
+real Plan records uploaded via DM (B1, B2, B4, B8).
 """
 
 from exercises.models import (
@@ -18,6 +17,7 @@ from exercises.models import (
     Exercise,
 )
 from exercises.slack_channels import SlackApiError, archive_exercise_channel, provision_exercise_channel
+from plans.models import Plan
 
 SUPPORTED_SUBCOMMANDS = ["run", "status", "gaps", "plans", "pause", "abort"]
 
@@ -33,7 +33,7 @@ def _active_exercise_for(user_id):
     ).first()
 
 
-def handle_run(args, user_id):
+def handle_run(args, user_id, channel_id):
     if _active_exercise_for(user_id):
         return _ephemeral(
             "*You already have an exercise running.* Use `/testmyplan status` "
@@ -60,7 +60,7 @@ def handle_run(args, user_id):
     )
 
 
-def handle_status(args, user_id):
+def handle_status(args, user_id, channel_id):
     exercise = _active_exercise_for(user_id)
     if exercise is None:
         return _ephemeral("*No exercise currently running.*")
@@ -75,24 +75,41 @@ def handle_status(args, user_id):
     )
 
 
-def handle_gaps(args, user_id):
-    # TODO: pull from the Plan gap review feature (B4) once plan parsing exists.
-    return _ephemeral(
-        "*Plan gap review isn't wired up yet.* This will list undefined "
-        "owners, missing escalation criteria and conflicting recovery "
-        "targets once plan intake is built."
-    )
+def handle_gaps(args, user_id, channel_id):
+    plans = Plan.objects(slack_channel_id=channel_id, is_latest=True).order_by("-created_at")
+    if not plans:
+        return _ephemeral(
+            "*No plans uploaded in this channel yet.* DM a DOCX/PDF/XLSX "
+            "plan to the app first."
+        )
+
+    lines = []
+    for plan in plans:
+        if not plan.gaps:
+            lines.append(f"*{plan.filename}* (v{plan.version}) -- :white_check_mark: no gaps found.")
+            continue
+        gap_lines = "\n".join(f"  - {g['message']}" for g in plan.gaps)
+        lines.append(f"*{plan.filename}* (v{plan.version}) -- {len(plan.gaps)} gap(s):\n{gap_lines}")
+
+    return _ephemeral("\n\n".join(lines))
 
 
-def handle_plans(args, user_id):
-    # TODO: list uploaded plans and their versions (B1, B8).
-    return _ephemeral(
-        "*No plans uploaded yet.* Drop a DOCX/PDF/XLSX plan into a DM with "
-        "the app once plan intake is built, and it'll show up here."
-    )
+def handle_plans(args, user_id, channel_id):
+    plans = Plan.objects(slack_channel_id=channel_id, is_latest=True).order_by("-created_at")
+    if not plans:
+        return _ephemeral(
+            "*No plans uploaded in this channel yet.* Drop a DOCX/PDF/XLSX "
+            "file into a DM with the app to add one."
+        )
+
+    lines = [
+        f"*{p.filename}* -- v{p.version}, status: `{p.status}`, {len(p.gaps)} gap(s)"
+        for p in plans
+    ]
+    return _ephemeral("\n".join(lines))
 
 
-def handle_pause(args, user_id):
+def handle_pause(args, user_id, channel_id):
     exercise = _active_exercise_for(user_id)
     if exercise is None:
         return _ephemeral("*No running exercise to pause.*")
@@ -102,7 +119,7 @@ def handle_pause(args, user_id):
     return _ephemeral(f"*{exercise.scenario_name}* paused.")
 
 
-def handle_abort(args, user_id):
+def handle_abort(args, user_id, channel_id):
     exercise = _active_exercise_for(user_id)
     if exercise is None:
         return _ephemeral("*No running exercise to abort.*")
@@ -128,10 +145,12 @@ _HANDLERS = {
 }
 
 
-def dispatch(command_text: str, user_id: str) -> dict:
+def dispatch(command_text: str, user_id: str, channel_id: str = "") -> dict:
     """
     command_text is whatever came after `/testmyplan`, e.g. "run ransomware".
-    Returns a Slack message dict to send back as the response.
+    Returns a Slack message dict to send back as the response. `gaps` and
+    `plans` are scoped to the channel the command was run in -- since plans
+    are uploaded via DM, that means running them in the same DM.
     """
     command_text = (command_text or "").strip()
     subcommand, _, args = command_text.partition(" ")
@@ -144,4 +163,4 @@ def dispatch(command_text: str, user_id: str) -> dict:
             + ", ".join(f"`{c}`" for c in SUPPORTED_SUBCOMMANDS)
         )
 
-    return handler(args.strip(), user_id)
+    return handler(args.strip(), user_id, channel_id)
