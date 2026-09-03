@@ -1,6 +1,7 @@
 import json
 import logging
 
+import mongoengine
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -9,6 +10,7 @@ from accounts.models import User
 from commands.slack_signature import SlackSignatureError, verify_slack_signature
 from plans.intake import handle_dm_message_event
 
+from .models import ProcessedSlackEvent
 from .slack_client import SlackApiError, publish_home_view
 from .view_builder import build_home_view
 
@@ -39,6 +41,12 @@ def slack_events(request):
         return JsonResponse({"challenge": payload.get("challenge", "")})
 
     if payload.get("type") == "event_callback":
+        event_id = payload.get("event_id", "")
+        if event_id and not _claim_event(event_id):
+            # Already handled this one -- Slack retried because our first
+            # response was too slow, not because anything is actually new.
+            return JsonResponse({"ok": True})
+
         event = payload.get("event", {})
 
         if event.get("type") == "app_home_opened" and event.get("tab") == "home":
@@ -55,6 +63,19 @@ def slack_events(request):
     # Slack only cares that we returned 200 quickly; the real work above
     # is fire-and-forget from its point of view.
     return JsonResponse({"ok": True})
+
+
+def _claim_event(event_id: str) -> bool:
+    """
+    Atomically records that we're handling this event_id. Returns True the
+    first time (go ahead and process it), False on any later attempt
+    (already claimed -- a Slack retry, skip it).
+    """
+    try:
+        ProcessedSlackEvent(event_id=event_id).save(force_insert=True)
+        return True
+    except mongoengine.errors.NotUniqueError:
+        return False
 
 
 def _handle_app_home_opened(event):
