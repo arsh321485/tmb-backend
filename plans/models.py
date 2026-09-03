@@ -35,6 +35,10 @@ class Plan(me.Document):
     # this is just the text for that future step to run against.
     extracted_text = me.StringField(required=False)
     parse_error = me.StringField(required=False)
+    # {"rto": [...], "rpo": [...], "emails": [...], "phones": [...], "sections": {...}}
+    # -- see plans/structured_extraction.py. Roles/triggers/escalation paths
+    # as real structured data are still open; this is pattern-matching, not NLP.
+    structured_data = me.DictField(required=False)
 
     created_at = me.DateTimeField(default=datetime.datetime.utcnow)
 

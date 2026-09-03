@@ -11,6 +11,7 @@ from django.conf import settings
 
 from .models import ALLOWED_EXTENSIONS, STATUS_FAILED, STATUS_PARSED, Plan
 from .parsing import PlanParsingError, extract_text
+from .structured_extraction import extract_structured_fields
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,27 @@ def _post_message(channel: str, text: str) -> None:
 
 def _extension_of(filename: str) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+
+def _summarize(structured: dict) -> str:
+    """One-line summary of what pattern-matching found, for the Slack reply."""
+    found = []
+    if structured.get("rto"):
+        found.append(f"RTO: {', '.join(structured['rto'])}")
+    if structured.get("rpo"):
+        found.append(f"RPO: {', '.join(structured['rpo'])}")
+    if structured.get("emails"):
+        found.append(f"{len(structured['emails'])} contact email(s)")
+    if structured.get("sections"):
+        found.append(f"{len(structured['sections'])} section(s)")
+
+    if not found:
+        return (
+            "No RTO/RPO targets, contacts or sections detected automatically -- "
+            "full structured analysis (roles, triggers, escalation paths) "
+            "still needs real NLP, this is pattern-matching only."
+        )
+    return "Found so far: " + "; ".join(found) + "."
 
 
 def handle_dm_message_event(event: dict) -> None:
@@ -88,6 +110,7 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
 
     try:
         plan.extracted_text = extract_text(resp.content, extension)
+        plan.structured_data = extract_structured_fields(plan.extracted_text)
         plan.status = STATUS_PARSED
     except PlanParsingError as exc:
         plan.status = STATUS_FAILED
@@ -103,10 +126,8 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
         word_count = len(plan.extracted_text.split())
         _post_message(
             channel_id,
-            f":inbox_tray: Got it -- *{filename}* uploaded and its text "
-            f"extracted (~{word_count} words). Structured analysis (roles, "
-            "triggers, RTO/RPO, escalation paths) isn't wired up yet, but "
-            "the content is ready for that once it is.",
+            f":inbox_tray: Got it -- *{filename}* uploaded and parsed "
+            f"(~{word_count} words). {_summarize(plan.structured_data)}",
         )
     else:
         _post_message(

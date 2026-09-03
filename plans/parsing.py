@@ -34,7 +34,16 @@ def _extract_docx(file_bytes: bytes) -> str:
     import docx  # python-docx
 
     document = docx.Document(io.BytesIO(file_bytes))
-    paragraphs = [p.text for p in document.paragraphs if p.text.strip()]
+    paragraphs = []
+    for p in document.paragraphs:
+        if not p.text.strip():
+            continue
+        # Mark headings so structured_extraction.py can find sections
+        # (e.g. "Escalation", "Contacts") by heading text, not just guesswork.
+        if p.style and p.style.name.startswith("Heading"):
+            paragraphs.append(f"## {p.text}")
+        else:
+            paragraphs.append(p.text)
 
     # Plans often carry key info (RACI grids, contact lists) in tables.
     for table in document.tables:
