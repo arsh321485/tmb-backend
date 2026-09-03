@@ -10,6 +10,7 @@ import requests
 from django.conf import settings
 
 from .contact_freshness import check_contacts, gaps_from_contact_checks
+from .control_mapping import map_controls
 from .models import ALLOWED_EXTENSIONS, STATUS_FAILED, STATUS_PARSED, Plan
 from .parsing import PlanParsingError, extract_text
 from .gap_review import find_gaps
@@ -116,6 +117,7 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
         plan.extracted_text = extract_text(resp.content, extension)
         plan.structured_data = extract_structured_fields(plan.extracted_text)
         plan.contact_checks = check_contacts(plan.structured_data.get("emails") or [])
+        plan.control_mapping = map_controls(plan.extracted_text)
         plan.gaps = find_gaps(plan.structured_data) + gaps_from_contact_checks(
             plan.contact_checks
         )
@@ -144,11 +146,17 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
             if plan.gaps
             else " :white_check_mark: No gaps found by the automatic checks."
         )
+        mentioned = plan.control_mapping.get("mentioned") if plan.control_mapping else []
+        control_note = (
+            f" Frameworks referenced: {', '.join(mentioned)}."
+            if mentioned
+            else " No recognized compliance frameworks (ISO 22301, NIST CSF, DORA, etc.) mentioned."
+        )
         _post_message(
             channel_id,
             f":inbox_tray: Got it -- *{filename}* uploaded and parsed "
             f"(~{word_count} words). {_summarize(plan.structured_data)}"
-            f"{version_note}{gap_note}",
+            f"{version_note}{gap_note}{control_note}",
         )
     else:
         _post_message(

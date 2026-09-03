@@ -50,6 +50,8 @@ class Plan(me.Document):
     # [{"email": ..., "status": ..., "display_name": ...}, ...] -- see
     # plans/contact_freshness.py (B5). status: active/deactivated/not_found/unknown.
     contact_checks = me.ListField(me.DictField(), default=list)
+    # {"mentioned": [...], "not_mentioned": [...]} -- see plans/control_mapping.py (B9).
+    control_mapping = me.DictField(required=False)
 
     created_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
