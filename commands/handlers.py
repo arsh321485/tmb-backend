@@ -6,7 +6,9 @@ These return plain dicts shaped like Slack's "message" response format
 
 `run`, `status`, `pause` and `abort` operate on a real Exercise record and
 a real auto-provisioned Slack channel (A6). `gaps` and `plans` operate on
-real Plan records uploaded via DM (B1, B2, B4, B8).
+real Plan records uploaded via DM (B1, B2, B4, B8). Everything is scoped
+by `team_id`, and every Slack API call uses that workspace's own bot
+token -- never a different client's.
 """
 
 from exercises.models import (
@@ -19,6 +21,7 @@ from exercises.models import (
 from exercises.slack_channels import SlackApiError, archive_exercise_channel, provision_exercise_channel
 from plans.models import Plan
 from plans.scenario_mapping import map_plan_coverage
+from workspaces.models import get_bot_token
 
 SUPPORTED_SUBCOMMANDS = ["run", "status", "gaps", "plans", "pause", "abort"]
 
@@ -28,24 +31,28 @@ def _ephemeral(text):
     return {"response_type": "ephemeral", "text": text}
 
 
-def _active_exercise_for(user_id):
+def _active_exercise_for(user_id, team_id):
     return Exercise.objects(
-        started_by_slack_user_id=user_id, status__in=[STATUS_RUNNING, STATUS_PAUSED]
+        started_by_slack_user_id=user_id,
+        slack_team_id=team_id,
+        status__in=[STATUS_RUNNING, STATUS_PAUSED],
     ).first()
 
 
-def handle_run(args, user_id, channel_id):
-    if _active_exercise_for(user_id):
+def handle_run(args, user_id, channel_id, team_id):
+    if _active_exercise_for(user_id, team_id):
         return _ephemeral(
             "*You already have an exercise running.* Use `/testmyplan status` "
             "to check it or `/testmyplan abort` to end it first."
         )
 
     scenario = args or "Unnamed scenario"
-    exercise = Exercise(scenario_name=scenario, started_by_slack_user_id=user_id)
+    exercise = Exercise(
+        scenario_name=scenario, started_by_slack_user_id=user_id, slack_team_id=team_id
+    )
 
     try:
-        channel = provision_exercise_channel(scenario, user_id)
+        channel = provision_exercise_channel(scenario, user_id, get_bot_token(team_id))
     except SlackApiError as exc:
         return _ephemeral(
             f":warning: Couldn't create the exercise channel ({exc}). "
@@ -61,8 +68,8 @@ def handle_run(args, user_id, channel_id):
     )
 
 
-def handle_status(args, user_id, channel_id):
-    exercise = _active_exercise_for(user_id)
+def handle_status(args, user_id, channel_id, team_id):
+    exercise = _active_exercise_for(user_id, team_id)
     if exercise is None:
         return _ephemeral("*No exercise currently running.*")
 
@@ -76,8 +83,10 @@ def handle_status(args, user_id, channel_id):
     )
 
 
-def handle_gaps(args, user_id, channel_id):
-    plans = Plan.objects(slack_channel_id=channel_id, is_latest=True).order_by("-created_at")
+def handle_gaps(args, user_id, channel_id, team_id):
+    plans = Plan.objects(
+        slack_team_id=team_id, slack_channel_id=channel_id, is_latest=True
+    ).order_by("-created_at")
     if not plans:
         return _ephemeral(
             "*No plans uploaded in this channel yet.* DM a DOCX/PDF/XLSX "
@@ -95,8 +104,10 @@ def handle_gaps(args, user_id, channel_id):
     return _ephemeral("\n\n".join(lines))
 
 
-def handle_plans(args, user_id, channel_id):
-    plans = Plan.objects(slack_channel_id=channel_id, is_latest=True).order_by("-created_at")
+def handle_plans(args, user_id, channel_id, team_id):
+    plans = Plan.objects(
+        slack_team_id=team_id, slack_channel_id=channel_id, is_latest=True
+    ).order_by("-created_at")
     if not plans:
         return _ephemeral(
             "*No plans uploaded in this channel yet.* Drop a DOCX/PDF/XLSX "
@@ -120,8 +131,8 @@ def handle_plans(args, user_id, channel_id):
     return _ephemeral("\n".join(lines))
 
 
-def handle_pause(args, user_id, channel_id):
-    exercise = _active_exercise_for(user_id)
+def handle_pause(args, user_id, channel_id, team_id):
+    exercise = _active_exercise_for(user_id, team_id)
     if exercise is None:
         return _ephemeral("*No running exercise to pause.*")
 
@@ -130,14 +141,14 @@ def handle_pause(args, user_id, channel_id):
     return _ephemeral(f"*{exercise.scenario_name}* paused.")
 
 
-def handle_abort(args, user_id, channel_id):
-    exercise = _active_exercise_for(user_id)
+def handle_abort(args, user_id, channel_id, team_id):
+    exercise = _active_exercise_for(user_id, team_id)
     if exercise is None:
         return _ephemeral("*No running exercise to abort.*")
 
     if exercise.slack_channel_id:
         try:
-            archive_exercise_channel(exercise.slack_channel_id)
+            archive_exercise_channel(exercise.slack_channel_id, get_bot_token(team_id))
         except SlackApiError:
             pass  # still mark it aborted even if archiving the channel failed
 
@@ -156,12 +167,12 @@ _HANDLERS = {
 }
 
 
-def dispatch(command_text: str, user_id: str, channel_id: str = "") -> dict:
+def dispatch(command_text: str, user_id: str, channel_id: str = "", team_id: str = "") -> dict:
     """
     command_text is whatever came after `/testmyplan`, e.g. "run ransomware".
-    Returns a Slack message dict to send back as the response. `gaps` and
-    `plans` are scoped to the channel the command was run in -- since plans
-    are uploaded via DM, that means running them in the same DM.
+    Returns a Slack message dict to send back as the response. Everything
+    is scoped to `team_id` -- the Slack workspace the command came from --
+    so two different clients' data and bot actions never cross over.
     """
     command_text = (command_text or "").strip()
     subcommand, _, args = command_text.partition(" ")
@@ -174,4 +185,4 @@ def dispatch(command_text: str, user_id: str, channel_id: str = "") -> dict:
             + ", ".join(f"`{c}`" for c in SUPPORTED_SUBCOMMANDS)
         )
 
-    return handler(args.strip(), user_id, channel_id)
+    return handler(args.strip(), user_id, channel_id, team_id)

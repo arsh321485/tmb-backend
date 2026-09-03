@@ -24,8 +24,9 @@ def slack_command(request):
     command_text = request.POST.get("text", "")
     user_id = request.POST.get("user_id", "")
     channel_id = request.POST.get("channel_id", "")
+    team_id = request.POST.get("team_id", "")
 
-    result = dispatch(command_text, user_id, channel_id)
+    result = dispatch(command_text, user_id, channel_id, team_id)
     return JsonResponse(result)
 
 

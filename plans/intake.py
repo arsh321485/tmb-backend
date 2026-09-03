@@ -7,7 +7,6 @@ Slack's `message` event (channel_type "im") that carries the file.
 import logging
 
 import requests
-from django.conf import settings
 
 from .contact_freshness import check_contacts, gaps_from_contact_checks
 from .control_mapping import map_controls
@@ -22,13 +21,13 @@ logger = logging.getLogger(__name__)
 SLACK_API_BASE = "https://slack.com/api"
 
 
-def _post_message(channel: str, text: str) -> None:
-    if not settings.SLACK_BOT_TOKEN:
-        logger.warning("Can't post to Slack -- SLACK_BOT_TOKEN not configured.")
+def _post_message(channel: str, text: str, bot_token: str) -> None:
+    if not bot_token:
+        logger.warning("Can't post to Slack -- no bot token for this workspace.")
         return
     requests.post(
         f"{SLACK_API_BASE}/chat.postMessage",
-        headers={"Authorization": f"Bearer {settings.SLACK_BOT_TOKEN}"},
+        headers={"Authorization": f"Bearer {bot_token}"},
         json={"channel": channel, "text": text},
         timeout=10,
     )
@@ -59,10 +58,12 @@ def _summarize(structured: dict) -> str:
     return "Found so far: " + "; ".join(found) + "."
 
 
-def handle_dm_message_event(event: dict) -> None:
+def handle_dm_message_event(event: dict, team_id: str, bot_token: str) -> None:
     """
     event is a Slack `message` event (see Events API: message.im). Only
-    acts on ones carrying files; ignores plain text DMs.
+    acts on ones carrying files; ignores plain text DMs. `team_id`/
+    `bot_token` identify which client workspace this came from -- every
+    Slack API call and saved record below is scoped to that workspace only.
     """
     files = event.get("files") or []
     if not files:
@@ -72,10 +73,12 @@ def handle_dm_message_event(event: dict) -> None:
     user_id = event.get("user", "")
 
     for f in files:
-        _ingest_one_file(f, channel_id, user_id)
+        _ingest_one_file(f, channel_id, user_id, team_id, bot_token)
 
 
-def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
+def _ingest_one_file(
+    slack_file: dict, channel_id: str, user_id: str, team_id: str, bot_token: str
+) -> None:
     filename = slack_file.get("name", "unnamed")
     extension = _extension_of(filename)
 
@@ -84,30 +87,32 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
             channel_id,
             f":warning: `{filename}` isn't a supported plan format. "
             "Drop a DOCX, PDF or XLSX file instead.",
+            bot_token,
         )
         return
 
     download_url = slack_file.get("url_private_download") or slack_file.get("url_private")
     if not download_url:
-        _post_message(channel_id, f":warning: Couldn't read `{filename}` from Slack.")
+        _post_message(channel_id, f":warning: Couldn't read `{filename}` from Slack.", bot_token)
         return
 
     try:
         resp = requests.get(
             download_url,
-            headers={"Authorization": f"Bearer {settings.SLACK_BOT_TOKEN}"},
+            headers={"Authorization": f"Bearer {bot_token}"},
             timeout=30,
         )
         resp.raise_for_status()
     except requests.RequestException:
         logger.exception("Failed to download plan file %s from Slack", filename)
-        _post_message(channel_id, f":warning: Couldn't download `{filename}` -- try again?")
+        _post_message(channel_id, f":warning: Couldn't download `{filename}` -- try again?", bot_token)
         return
 
     plan = Plan(
         filename=filename,
         file_extension=extension,
         uploaded_by_slack_user_id=user_id,
+        slack_team_id=team_id,
         slack_channel_id=channel_id,
     )
     plan.file_data.put(resp.content, content_type=slack_file.get("mimetype", ""))
@@ -116,7 +121,7 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
     try:
         plan.extracted_text = extract_text(resp.content, extension)
         plan.structured_data = extract_structured_fields(plan.extracted_text)
-        plan.contact_checks = check_contacts(plan.structured_data.get("emails") or [])
+        plan.contact_checks = check_contacts(plan.structured_data.get("emails") or [], bot_token)
         plan.control_mapping = map_controls(plan.extracted_text)
         plan.gaps = find_gaps(plan.structured_data) + gaps_from_contact_checks(
             plan.contact_checks
@@ -157,6 +162,7 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
             f":inbox_tray: Got it -- *{filename}* uploaded and parsed "
             f"(~{word_count} words). {_summarize(plan.structured_data)}"
             f"{version_note}{gap_note}{control_note}",
+            bot_token,
         )
     else:
         _post_message(
@@ -164,4 +170,5 @@ def _ingest_one_file(slack_file: dict, channel_id: str, user_id: str) -> None:
             f":inbox_tray: Got it -- *{filename}* uploaded and saved, but "
             f"I couldn't read its text ({plan.parse_error}). The file is "
             "still stored.",
+            bot_token,
         )

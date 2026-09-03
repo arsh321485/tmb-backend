@@ -11,7 +11,6 @@ import re
 import time
 
 import requests
-from django.conf import settings
 
 SLACK_API_BASE = "https://slack.com/api"
 
@@ -26,13 +25,13 @@ class SlackApiError(Exception):
     pass
 
 
-def _call(method: str, **payload) -> dict:
-    if not settings.SLACK_BOT_TOKEN:
-        raise SlackApiError("SLACK_BOT_TOKEN isn't configured.")
+def _call(method: str, bot_token: str, **payload) -> dict:
+    if not bot_token:
+        raise SlackApiError("No bot token for this workspace -- is it installed?")
 
     response = requests.post(
         f"{SLACK_API_BASE}/{method}",
-        headers={"Authorization": f"Bearer {settings.SLACK_BOT_TOKEN}"},
+        headers={"Authorization": f"Bearer {bot_token}"},
         json=payload,
         timeout=10,
     ).json()
@@ -48,32 +47,34 @@ def _channel_name_for(scenario_name: str) -> str:
     return f"exercise-{slug}-{int(time.time())}"[:80]
 
 
-def provision_exercise_channel(scenario_name: str, inviter_slack_user_id: str = "") -> dict:
+def provision_exercise_channel(scenario_name: str, inviter_slack_user_id: str, bot_token: str) -> dict:
     """
     Creates the channel, invites the person who ran /testmyplan run, and
     posts the exercise safety banner. Returns {"id": ..., "name": ...}.
+    Always operates within the workspace that owns `bot_token`.
     """
     channel_name = _channel_name_for(scenario_name)
 
-    created = _call("conversations.create", name=channel_name, is_private=False)
+    created = _call("conversations.create", bot_token, name=channel_name, is_private=False)
     channel_id = created["channel"]["id"]
 
     if inviter_slack_user_id:
         try:
-            _call("conversations.invite", channel=channel_id, users=inviter_slack_user_id)
+            _call("conversations.invite", bot_token, channel=channel_id, users=inviter_slack_user_id)
         except SlackApiError:
             # Not fatal -- the channel still exists, they can be added manually.
             pass
 
-    _call("chat.postMessage", channel=channel_id, text=EXERCISE_BANNER)
+    _call("chat.postMessage", bot_token, channel=channel_id, text=EXERCISE_BANNER)
 
     return {"id": channel_id, "name": created["channel"]["name"]}
 
 
-def archive_exercise_channel(channel_id: str) -> None:
+def archive_exercise_channel(channel_id: str, bot_token: str) -> None:
     _call(
         "chat.postMessage",
+        bot_token,
         channel=channel_id,
         text=":checkered_flag: Exercise ended. This channel is now archived.",
     )
-    _call("conversations.archive", channel=channel_id)
+    _call("conversations.archive", bot_token, channel=channel_id)

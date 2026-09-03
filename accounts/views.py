@@ -10,6 +10,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .models import SlackAccount, TeamsAccount, User
+from workspaces.models import Workspace
 
 
 def _get_or_create_user(email, name=""):
@@ -26,17 +27,25 @@ def _get_or_create_user(email, name=""):
 
 # ---------------------------------------------------------------------------
 # Slack OAuth
+#
+# This is the real "Add to Slack" install flow (OAuth v2), not the
+# identity-only "Sign in with Slack". That distinction matters: identity-only
+# sign-in can't be used by a brand new client, because it never actually
+# installs the bot (with real permissions) into their workspace -- someone
+# would still have to separately install it via the developer dashboard,
+# which a real customer can't do. This flow installs the bot AND identifies
+# the installing user in one step, so any workspace can self-serve onboard.
 # ---------------------------------------------------------------------------
 
-SLACK_AUTHORIZE_URL = "https://slack.com/openid/connect/authorize"
-SLACK_TOKEN_URL = "https://slack.com/api/openid.connect.token"
-SLACK_USERINFO_URL = "https://slack.com/api/openid.connect.userInfo"
+SLACK_AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
+SLACK_TOKEN_URL = "https://slack.com/api/oauth.v2.access"
+SLACK_USERINFO_URL = "https://slack.com/api/users.info"
 
 
 @require_GET
 def slack_login(request):
     """
-    Step 1: send the browser to Slack's consent screen.
+    Step 1: send the browser to Slack's "Add to Slack" consent screen.
     This is what the "Signup with Slack" button should link to.
     """
     state = secrets.token_urlsafe(24)
@@ -44,10 +53,9 @@ def slack_login(request):
 
     params = {
         "client_id": settings.SLACK_CLIENT_ID,
-        "scope": settings.SLACK_SCOPES,
+        "scope": settings.SLACK_BOT_SCOPES,
         "redirect_uri": settings.SLACK_REDIRECT_URI,
         "state": state,
-        "response_type": "code",
     }
     return HttpResponseRedirect(f"{SLACK_AUTHORIZE_URL}?{urlencode(params)}")
 
@@ -56,8 +64,10 @@ def slack_login(request):
 def slack_callback(request):
     """
     Step 2: Slack redirects here with ?code=...&state=...
-    Exchange the code for a token, fetch the user's profile, create/update
-    our User record, then bounce back to the frontend.
+    Exchanges the code for THIS WORKSPACE's own bot token, saves it
+    (Workspace, keyed by team id -- never mixed with any other client's
+    token), identifies the installing user with that new bot token, then
+    bounces back to the frontend.
     """
     error = request.GET.get("error")
     if error:
@@ -80,29 +90,47 @@ def slack_callback(request):
         timeout=10,
     ).json()
 
-    if not token_resp.get("ok", True) and "access_token" not in token_resp:
+    if not token_resp.get("ok"):
         return _redirect_to_frontend(error="slack_token_exchange_failed")
 
-    access_token = token_resp.get("access_token")
+    bot_token = token_resp.get("access_token")
+    bot_user_id = token_resp.get("bot_user_id", "")
+    team = token_resp.get("team", {})
+    team_id = team.get("id", "")
+    authed_user_id = token_resp.get("authed_user", {}).get("id", "")
 
+    if not bot_token or not team_id:
+        return _redirect_to_frontend(error="slack_install_incomplete")
+
+    workspace = Workspace.objects(team_id=team_id).first() or Workspace(team_id=team_id)
+    workspace.team_name = team.get("name", workspace.team_name)
+    workspace.bot_token = bot_token
+    workspace.bot_user_id = bot_user_id
+    workspace.installed_by_slack_user_id = authed_user_id
+    workspace.save()
+
+    # Use the workspace's own brand-new bot token to look up who installed
+    # it -- needs the users:read.email bot scope (already requested above).
     userinfo = requests.get(
         SLACK_USERINFO_URL,
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers={"Authorization": f"Bearer {bot_token}"},
+        params={"user": authed_user_id},
         timeout=10,
     ).json()
+    profile = userinfo.get("user", {}).get("profile", {})
 
-    email = userinfo.get("email")
+    email = profile.get("email")
     if not email:
         return _redirect_to_frontend(error="slack_email_missing")
 
-    user = _get_or_create_user(email, userinfo.get("name", ""))
-    user.name = user.name or userinfo.get("name", "")
-    user.avatar_url = userinfo.get("picture", user.avatar_url)
+    user = _get_or_create_user(email, profile.get("real_name", ""))
+    user.name = user.name or profile.get("real_name", "")
+    user.avatar_url = profile.get("image_192", user.avatar_url)
     user.slack_account = SlackAccount(
-        slack_user_id=userinfo.get("sub", ""),
-        team_id=userinfo.get("https://slack.com/team_id", ""),
-        team_name=userinfo.get("https://slack.com/team_name", ""),
-        access_token=access_token,
+        slack_user_id=authed_user_id,
+        team_id=team_id,
+        team_name=team.get("name", ""),
+        access_token=bot_token,
     )
     user.save()
 

@@ -9,6 +9,7 @@ from django.views.decorators.http import require_POST
 from accounts.models import User
 from commands.slack_signature import SlackSignatureError, verify_slack_signature
 from plans.intake import handle_dm_message_event
+from workspaces.models import get_bot_token
 
 from .models import ProcessedSlackEvent
 from .slack_client import SlackApiError, publish_home_view
@@ -48,9 +49,14 @@ def slack_events(request):
             return JsonResponse({"ok": True})
 
         event = payload.get("event", {})
+        # Which client workspace this event belongs to -- top-level on the
+        # envelope, not inside "event". Everything downstream must use
+        # THIS workspace's bot token, never a different client's.
+        team_id = payload.get("team_id", "")
+        bot_token = get_bot_token(team_id)
 
         if event.get("type") == "app_home_opened" and event.get("tab") == "home":
-            _handle_app_home_opened(event)
+            _handle_app_home_opened(event, bot_token)
 
         elif (
             event.get("type") == "message"
@@ -58,7 +64,7 @@ def slack_events(request):
             and "bot_id" not in event
             and event.get("subtype") != "bot_message"
         ):
-            handle_dm_message_event(event)
+            handle_dm_message_event(event, team_id, bot_token)
 
     # Slack only cares that we returned 200 quickly; the real work above
     # is fire-and-forget from its point of view.
@@ -78,12 +84,12 @@ def _claim_event(event_id: str) -> bool:
         return False
 
 
-def _handle_app_home_opened(event):
+def _handle_app_home_opened(event, bot_token):
     slack_user_id = event.get("user", "")
     user = User.objects(slack_account__slack_user_id=slack_user_id).first()
 
     view = build_home_view(user)
     try:
-        publish_home_view(slack_user_id, view)
+        publish_home_view(slack_user_id, view, bot_token)
     except SlackApiError:
         logger.exception("Failed to publish Slack Home tab for user %s", slack_user_id)

@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "home_tab",
     "exercises",
     "plans",
+    "workspaces",
 ]
 
 MIDDLEWARE = [
@@ -83,14 +84,25 @@ SLACK_CLIENT_SECRET = config("SLACK_CLIENT_SECRET", default="")
 SLACK_REDIRECT_URI = config(
     "SLACK_REDIRECT_URI", default=f"{BACKEND_URL}/api/auth/slack/callback/"
 )
+# LEGACY: was used for the old identity-only "Sign in with Slack" flow.
+# The real install flow (SLACK_BOT_SCOPES below) replaced it.
 SLACK_SCOPES = config("SLACK_SCOPES", default="openid,email,profile")
+# Bot permission scopes requested during the real "Add to Slack" install
+# (OAuth v2) -- must match what's actually enabled under Bot Token Scopes
+# in the Slack app dashboard, or the install will be rejected.
+SLACK_BOT_SCOPES = config(
+    "SLACK_BOT_SCOPES",
+    default="channels:history,channels:manage,chat:write,commands,users:read.email",
+)
 # Used to verify that a slash-command request really came from Slack.
 # Find it in api.slack.com/apps -> your app -> Basic Information -> Signing Secret.
 SLACK_SIGNING_SECRET = config("SLACK_SIGNING_SECRET", default="")
 
-# Bot token used to actively call Slack's API (e.g. publish the Home tab).
-# Find it in api.slack.com/apps -> your app -> OAuth & Permissions ->
-# "Bot User OAuth Token" (starts with xoxb-). Different from SLACK_CLIENT_SECRET.
+# LEGACY / no longer used by the app itself: every real Slack API call now
+# looks up its OWN workspace's bot token from workspaces.models.Workspace
+# (one token per installed client, saved during the /api/auth/slack/
+# install flow) instead of a single shared token. Kept only so a one-off
+# script can bootstrap the very first Workspace record from it if needed.
 SLACK_BOT_TOKEN = config("SLACK_BOT_TOKEN", default="")
 
 # --- Microsoft Teams (Azure AD) OAuth ---

@@ -12,7 +12,6 @@ the Slack workspace, using users.lookupByEmail.
 import logging
 
 import requests
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,24 +23,25 @@ STATUS_NOT_FOUND = "not_found"
 STATUS_UNKNOWN = "unknown"  # lookup itself failed (network/API error)
 
 
-def check_contacts(emails: list[str]) -> list[dict]:
+def check_contacts(emails: list[str], bot_token: str) -> list[dict]:
     """
     Returns [{"email": ..., "status": ..., "display_name": ...}, ...] for
-    each email, checked against the Slack workspace directory.
+    each email, checked against the Slack workspace directory -- always
+    the workspace that owns `bot_token`, never a different client's.
     """
-    if not settings.SLACK_BOT_TOKEN:
+    if not bot_token:
         return [
             {"email": e, "status": STATUS_UNKNOWN, "display_name": None} for e in emails
         ]
 
-    return [_check_one(email) for email in emails]
+    return [_check_one(email, bot_token) for email in emails]
 
 
-def _check_one(email: str) -> dict:
+def _check_one(email: str, bot_token: str) -> dict:
     try:
         resp = requests.get(
             SLACK_LOOKUP_URL,
-            headers={"Authorization": f"Bearer {settings.SLACK_BOT_TOKEN}"},
+            headers={"Authorization": f"Bearer {bot_token}"},
             params={"email": email},
             timeout=10,
         ).json()
