@@ -7,6 +7,7 @@ that setup/reporting cards live there) and post the Welcome card into it.
 import logging
 
 from .loader import load_card
+from .nav import with_nav_bar
 from .slack_client import SlackApiError, _call, post_card_to_channel
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def send_welcome(installer_slack_user_id: str, org_name: str, person_name: str, 
             pass  # already a member, or can't invite -- not fatal
 
         card = load_card("01-welcome.json", org_name=org_name, person_name=person_name)
+        card = with_nav_bar(card, "welcome")
         post_card_to_channel(channel_id, card, bot_token)
     except SlackApiError:
         logger.exception("Failed to send welcome card for installer %s", installer_slack_user_id)

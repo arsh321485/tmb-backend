@@ -23,6 +23,7 @@ import requests
 
 from accounts.models import User
 from cards.loader import load_card
+from cards.nav import card_file_for_nav_key, nav_key_for_card_file, with_nav_bar
 from workspaces.models import Workspace, get_bot_token
 
 logger = logging.getLogger(__name__)
@@ -65,19 +66,29 @@ def handle_block_action(payload: dict) -> None:
         return
 
     action_id = actions[0].get("action_id", "")
-    # Some cards have several buttons that used to share one action_id
-    # (invalid in Slack -- see the "invalid_blocks" fix) and now look like
-    # "threat_jump__continuity_infra". Match on the part before "__" so
-    # they still route the same way regardless of which option was picked.
-    lookup_id = action_id.split("__", 1)[0]
 
-    if lookup_id not in _ADVANCE_MAP:
-        logger.info("No handler wired yet for action_id=%s", action_id)
-        return
+    # The nav bar (see nav.py) -- jump straight to any of the 5 main steps,
+    # not just move forward one at a time.
+    if action_id.startswith("nav_jump__"):
+        target_key = actions[0].get("value", "")
+        next_card_file = card_file_for_nav_key(target_key)
+        if next_card_file is None:
+            return
+    else:
+        # Some cards have several buttons that used to share one action_id
+        # (invalid in Slack -- see the "invalid_blocks" fix) and now look
+        # like "threat_jump__continuity_infra". Match on the part before
+        # "__" so they still route the same way regardless of which
+        # option was picked.
+        lookup_id = action_id.split("__", 1)[0]
 
-    next_card_file = _ADVANCE_MAP[lookup_id]
-    if next_card_file is None:
-        return  # acknowledged, nothing to change on screen
+        if lookup_id not in _ADVANCE_MAP:
+            logger.info("No handler wired yet for action_id=%s", action_id)
+            return
+
+        next_card_file = _ADVANCE_MAP[lookup_id]
+        if next_card_file is None:
+            return  # acknowledged, nothing to change on screen
 
     workspace = Workspace.objects(team_id=team_id).first()
     user = User.objects(slack_account__slack_user_id=slack_user_id).first()
@@ -85,6 +96,11 @@ def handle_block_action(payload: dict) -> None:
     person_name = user.name if user else ""
 
     card = load_card(next_card_file, org_name=org_name, person_name=person_name)
+
+    nav_key = nav_key_for_card_file(next_card_file)
+    if nav_key:
+        card = with_nav_bar(card, nav_key)
+
     _replace_message(response_url, card)
 
 
