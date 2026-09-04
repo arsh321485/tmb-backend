@@ -7,6 +7,10 @@ class CustomTeam(me.EmbeddedDocument):
     name = me.StringField(required=True)
     module = me.StringField(required=False)
     member_slack_user_ids = me.ListField(me.StringField(), default=list)
+    # [{"role": "IR Lead", "member": "<slack_user_id>"}, ...] -- per-person
+    # role, matching the design's intent (member_slack_user_ids alone loses
+    # which role each person was assigned).
+    role_assignments = me.ListField(me.DictField(), default=list)
 
 
 class WizardState(me.Document):
