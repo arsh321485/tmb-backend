@@ -23,7 +23,9 @@ import requests
 
 from accounts.models import User
 from cards.loader import load_card
+from cards.models import get_or_create_state
 from cards.nav import card_file_for_nav_key, nav_key_for_card_file, with_nav_bar
+from cards.render import build_admin_team_card
 from workspaces.models import Workspace, get_bot_token
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,22 @@ def handle_block_action(payload: dict) -> None:
 
     action_id = actions[0].get("action_id", "")
 
+    # "Add Priya" etc -- actually persist the addition (WizardState) and
+    # re-render the admin team card reflecting it, instead of a no-op.
+    if action_id == "admin_add":
+        person_code = actions[0].get("value", "")
+        state = get_or_create_state(team_id)
+        if person_code and person_code not in state.admins_added:
+            state.admins_added.append(person_code)
+            state.save()
+
+        workspace = Workspace.objects(team_id=team_id).first()
+        org_name = workspace.team_name if workspace else ""
+        card = build_admin_team_card(team_id, org_name=org_name)
+        card = with_nav_bar(card, "admin")
+        _replace_message(response_url, card)
+        return
+
     # The nav bar (see nav.py) -- jump straight to any of the 5 main steps,
     # not just move forward one at a time.
     if action_id.startswith("nav_jump__"):
@@ -95,7 +113,10 @@ def handle_block_action(payload: dict) -> None:
     org_name = workspace.team_name if workspace else ""
     person_name = user.name if user else ""
 
-    card = load_card(next_card_file, org_name=org_name, person_name=person_name)
+    if next_card_file == "02-admin-team.json":
+        card = build_admin_team_card(team_id, org_name=org_name, person_name=person_name)
+    else:
+        card = load_card(next_card_file, org_name=org_name, person_name=person_name)
 
     nav_key = nav_key_for_card_file(next_card_file)
     if nav_key:
