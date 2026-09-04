@@ -25,6 +25,24 @@ def _get_or_create_user(email, name=""):
     return user
 
 
+def _get_or_create_slack_user(slack_user_id, team_id, email=None, name=""):
+    """
+    Like _get_or_create_user, but for Slack installs where the bot doesn't
+    have the users:read.email scope granted (email will be None) --
+    matches by Slack identity instead so the user can still be recognized.
+    """
+    if email:
+        return _get_or_create_user(email, name)
+
+    user = User.objects(
+        slack_account__slack_user_id=slack_user_id, slack_account__team_id=team_id
+    ).first()
+    if user is None:
+        user = User(name=name)
+        user.save()
+    return user
+
+
 # ---------------------------------------------------------------------------
 # Slack OAuth
 #
@@ -110,7 +128,10 @@ def slack_callback(request):
     workspace.save()
 
     # Use the workspace's own brand-new bot token to look up who installed
-    # it -- needs the users:read.email bot scope (already requested above).
+    # it. `email` in the response requires the users:read.email bot scope --
+    # if that scope isn't available/approved, profile.email will just be
+    # absent and we identify the user by Slack identity instead (see
+    # _get_or_create_slack_user).
     userinfo = requests.get(
         SLACK_USERINFO_URL,
         headers={"Authorization": f"Bearer {bot_token}"},
@@ -118,13 +139,11 @@ def slack_callback(request):
         timeout=10,
     ).json()
     profile = userinfo.get("user", {}).get("profile", {})
+    display_name = profile.get("real_name") or userinfo.get("user", {}).get("name", "")
 
     email = profile.get("email")
-    if not email:
-        return _redirect_to_frontend(error="slack_email_missing")
-
-    user = _get_or_create_user(email, profile.get("real_name", ""))
-    user.name = user.name or profile.get("real_name", "")
+    user = _get_or_create_slack_user(authed_user_id, team_id, email, display_name)
+    user.name = user.name or display_name
     user.avatar_url = profile.get("image_192", user.avatar_url)
     user.slack_account = SlackAccount(
         slack_user_id=authed_user_id,

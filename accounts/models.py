@@ -22,11 +22,15 @@ class TeamsAccount(me.EmbeddedDocument):
 class User(me.Document):
     """
     A user of the app. Created the first time someone signs up via Slack or
-    Teams (or, later, email). One user can have a Slack account and/or a
-    Teams account linked, matched by email.
+    Teams (or, later, email). Matched by email when we have it; Slack
+    installs where the `users:read.email` scope isn't available fall back
+    to matching by Slack user id + team id instead (see accounts/views.py).
     """
 
-    email = me.EmailField(required=True, unique=True)
+    # Optional + sparse: a Slack-only user created without an email must
+    # not collide with (or block) other such users under a single unique
+    # null value.
+    email = me.EmailField(required=False, unique=True, sparse=True)
     name = me.StringField(max_length=255)
     avatar_url = me.URLField(required=False)
 
