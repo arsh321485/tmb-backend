@@ -21,12 +21,15 @@ import logging
 
 import requests
 
+import mongoengine
+
 from accounts.models import User
 from cards.create_team_modal import handle_add_member_click, handle_submission, open_modal
 from cards.loader import load_card
 from cards.models import get_or_create_state
 from cards.nav import card_file_for_nav_key, nav_key_for_card_file, with_nav_bar
 from cards.render import build_admin_team_card
+from home_tab.models import ProcessedSlackEvent
 from workspaces.models import Workspace, get_bot_token
 
 logger = logging.getLogger(__name__)
@@ -146,10 +149,26 @@ def handle_block_action(payload: dict) -> None:
 
 def handle_view_submission(payload: dict) -> None:
     """The 'Create team' button inside the modal opened by team_create."""
+    view_id = payload.get("view", {}).get("id", "")
+    # Confirmed live: submitting posted the confirmation twice. Same fix
+    # as the Events API's retry dedup -- claim this exact view_id once;
+    # a genuinely new modal open gets a fresh view_id, so this doesn't
+    # block real re-submissions after fixing a validation error.
+    if view_id and not _claim(f"view_submit:{view_id}"):
+        return
+
     team_id = payload.get("team", {}).get("id", "")
     bot_token = get_bot_token(team_id)
     if bot_token:
         handle_submission(payload, bot_token)
+
+
+def _claim(key: str) -> bool:
+    try:
+        ProcessedSlackEvent(event_id=key).save(force_insert=True)
+        return True
+    except mongoengine.errors.NotUniqueError:
+        return False
 
 
 def _replace_message(response_url: str, card: dict) -> None:
