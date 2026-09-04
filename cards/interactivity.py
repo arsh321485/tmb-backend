@@ -22,6 +22,7 @@ import logging
 import requests
 
 from accounts.models import User
+from cards.create_team_modal import handle_submission, open_modal
 from cards.loader import load_card
 from cards.models import get_or_create_state
 from cards.nav import card_file_for_nav_key, nav_key_for_card_file, with_nav_bar
@@ -68,6 +69,16 @@ def handle_block_action(payload: dict) -> None:
         return
 
     action_id = actions[0].get("action_id", "")
+
+    # "Create a team" -- opens a real Slack modal (see create_team_modal.py)
+    # instead of another chat card, since it needs actual form inputs.
+    if action_id == "team_create":
+        trigger_id = payload.get("trigger_id", "")
+        channel_id = payload.get("channel", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        if trigger_id and bot_token:
+            open_modal(trigger_id, channel_id, bot_token)
+        return
 
     # "Add Priya" etc -- actually persist the addition (WizardState) and
     # re-render the admin team card reflecting it, instead of a no-op.
@@ -123,6 +134,14 @@ def handle_block_action(payload: dict) -> None:
         card = with_nav_bar(card, nav_key)
 
     _replace_message(response_url, card)
+
+
+def handle_view_submission(payload: dict) -> None:
+    """The 'Create team' button inside the modal opened by team_create."""
+    team_id = payload.get("team", {}).get("id", "")
+    bot_token = get_bot_token(team_id)
+    if bot_token:
+        handle_submission(payload, bot_token)
 
 
 def _replace_message(response_url: str, card: dict) -> None:

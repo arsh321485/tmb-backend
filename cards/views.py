@@ -6,7 +6,7 @@ from django.views.decorators.http import require_POST
 
 from commands.slack_signature import SlackSignatureError, verify_slack_signature
 
-from .interactivity import handle_block_action
+from .interactivity import handle_block_action, handle_view_submission
 
 
 @csrf_exempt
@@ -30,6 +30,8 @@ def slack_interactivity(request):
 
     if payload.get("type") == "block_actions":
         handle_block_action(payload)
+    elif payload.get("type") == "view_submission":
+        handle_view_submission(payload)
 
     # Slack just needs a fast 200; the real work above already happened
     # (posting the next card), it isn't part of this response.
