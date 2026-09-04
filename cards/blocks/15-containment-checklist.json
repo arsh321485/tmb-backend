@@ -1,0 +1,77 @@
+{
+  "channel": "#ir-war-room",
+  "text": "Containment checklist — IR playbook v4.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Containment checklist",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":clipboard: *IR playbook v4*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Tick each step as you complete it — timings feed the preparedness score."
+      }
+    },
+    {
+      "type": "actions",
+      "block_id": "ir_checklist",
+      "elements": [
+        {
+          "type": "checkboxes",
+          "action_id": "ir_steps",
+          "options": [
+            {
+              "text": {
+                "type": "mrkdwn",
+                "text": "Isolate affected segment"
+              },
+              "value": "isolate"
+            },
+            {
+              "text": {
+                "type": "mrkdwn",
+                "text": "Preserve forensic images"
+              },
+              "value": "forensics"
+            },
+            {
+              "text": {
+                "type": "mrkdwn",
+                "text": "Reset credentials for affected users"
+              },
+              "value": "reset"
+            },
+            {
+              "text": {
+                "type": "mrkdwn",
+                "text": "Confirm backups are offline and clean"
+              },
+              "value": "backups"
+            },
+            {
+              "text": {
+                "type": "mrkdwn",
+                "text": "Brief the command center"
+              },
+              "value": "brief"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "channel": "#privacy-bridge",
+  "text": "Channel created · #privacy-bridge — Privacy Response Team invited.",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":hash: *Channel created · #privacy-bridge*\nPrivacy Response Team invited · Marco Castellanos"
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "channel": "#privacy-bridge",
+  "text": "Notification clock — 72-hour GDPR window.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Notification clock",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":alarm_clock: *Statutory · 72-hour window*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Awareness was established at *08:40*. The 72-hour window closes *Thursday 08:40*."
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Remaining*\n68h 12m"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Records*\n4,180"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Jurisdictions*\n3"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Processor*\nTier 1"
+        }
+      ]
+    }
+  ]
+}

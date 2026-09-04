@@ -1,0 +1,140 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "Step 1 · Admin team — share the admin load by module.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Step 1 · Admin team",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":busts_in_silhouette: *Share the load*  ·  0 added"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Each admin can run every module, or only the ones under their responsibility."
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Priya Adeyemi*\nRisk & Compliance · suggested: All modules"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add Priya",
+            "emoji": true
+          },
+          "action_id": "admin_add",
+          "value": "PA"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Marco Castellanos*\nPrivacy Counsel · suggested: Privacy · ESG"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add Marco",
+            "emoji": true
+          },
+          "action_id": "admin_add",
+          "value": "MC"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: James Whitfield*\nInfrastructure / BC · suggested: Business Continuity"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add James",
+            "emoji": true
+          },
+          "action_id": "admin_add",
+          "value": "JW"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Lena Bianchi*\nCommunications · suggested: Crisis Comms"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add Lena",
+            "emoji": true
+          },
+          "action_id": "admin_add",
+          "value": "LB"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Continue — set up response teams",
+            "emoji": true
+          },
+          "action_id": "admin_done",
+          "value": "next",
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}

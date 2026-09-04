@@ -1,0 +1,246 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "Step 2 · Response teams — add members and they get a DM with their role.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Step 2 · Response teams",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":shield: *Mandatory teams*  ·  0 / 6 filled"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Add each member and they get a DM with their role. You can also build your own teams for anything specific to *Veridian Health*."
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add suggested role",
+            "emoji": true
+          },
+          "action_id": "teams_add_all",
+          "value": "all"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Incident Response Team*\nCybersecurity"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Sofia Reyes* — IR Lead · suggested"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add Sofia",
+            "emoji": true
+          },
+          "action_id": "team_add",
+          "value": "ir:IR Lead:SR"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Tomas Kruger* — SOC Analyst · suggested"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add Tomas",
+            "emoji": true
+          },
+          "action_id": "team_add",
+          "value": "ir:SOC Analyst:TK"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Business Continuity Team*\nBusiness Continuity"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: James Whitfield* — BC Lead · suggested"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add James",
+            "emoji": true
+          },
+          "action_id": "team_add",
+          "value": "bc:BC Lead:JW"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Kenji Sato* — IT Operations · suggested"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add Kenji",
+            "emoji": true
+          },
+          "action_id": "team_add",
+          "value": "bc:IT Operations:KS"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Privacy Response Team*\nPrivacy"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Marco Castellanos* — Privacy Counsel · suggested"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add Marco",
+            "emoji": true
+          },
+          "action_id": "team_add",
+          "value": "privacy:Privacy Counsel:MC"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Crisis Comms Team*\nCrisis Comms"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Lena Bianchi* — Comms Lead · suggested"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Add Lena",
+            "emoji": true
+          },
+          "action_id": "team_add",
+          "value": "comms:Comms Lead:LB"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Create a team",
+            "emoji": true
+          },
+          "action_id": "team_create",
+          "value": "open"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Teams ready — show my threat map",
+            "emoji": true
+          },
+          "action_id": "teams_done",
+          "value": "next",
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "Step 6 · Trigger — every test starts with a trigger.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Step 6 · Trigger",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":zap: *Required*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Every test starts with a trigger.*"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Trigger now",
+            "emoji": true
+          },
+          "action_id": "trigger_now",
+          "value": "now",
+          "style": "danger"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Schedule",
+            "emoji": true
+          },
+          "action_id": "trigger_sched",
+          "value": "sched"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Surprise window",
+            "emoji": true
+          },
+          "action_id": "trigger_surprise",
+          "value": "surprise"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":zap: *Trigger now* — Launch immediately, teams are notified in their channel\n:calendar: *Schedule* — Pick a window; participants get a calendar hold\n:ghost: *Surprise window* — Fires at random within the next 7 days"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "Step 4 · Scenario — Infrastructure loss → Data-center outage.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Step 4 · Scenario",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":fire: *Business Continuity*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "`Infrastructure loss`  →  `Data-center outage`  →  `Regional power / network failure`"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Pick a test scenario*"
+      }
+    },
+    {
+      "type": "actions",
+      "block_id": "scenario_pick",
+      "elements": [
+        {
+          "type": "radio_buttons",
+          "action_id": "scenario_select",
+          "options": [
+            {
+              "text": {
+                "type": "plain_text",
+                "text": "Regional Data-Center Failover"
+              },
+              "value": "Regional Data-Center Failover"
+            },
+            {
+              "text": {
+                "type": "plain_text",
+                "text": "Cloud region outage"
+              },
+              "value": "Cloud region outage"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "View the test plan",
+            "emoji": true
+          },
+          "action_id": "scenario_plan",
+          "value": "next",
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "channel": "#ir-war-room",
+  "text": "Containment decision logged · Isolate the VLAN.",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":white_check_mark: *Containment decision logged · Isolate the VLAN*\nSofia Reyes · 2m 18s from trigger"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Timestamped in the evidence log · visible to the admin in the command center"
+        }
+      ]
+    }
+  ]
+}

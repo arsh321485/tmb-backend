@@ -1,0 +1,208 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "Step 3 · Threat map — pick a cause to see its test scenarios.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Step 3 · Threat map",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":dart: *Ranked by criticality*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Your organization's threats, the incidents that exploit them, and each incident's causes. Pick a cause to see its test scenarios."
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Most critical now*"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Infrastructure loss · BC",
+            "emoji": true
+          },
+          "action_id": "threat_jump",
+          "value": "continuity:infra"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "External attacker · Cyber",
+            "emoji": true
+          },
+          "action_id": "threat_jump",
+          "value": "cyber:ext"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Personal-data breach · Privacy",
+            "emoji": true
+          },
+          "action_id": "threat_jump",
+          "value": "privacy:breach"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "radio_buttons",
+          "action_id": "threat_module",
+          "initial_option": {
+            "text": {
+              "type": "plain_text",
+              "text": "Business Continuity"
+            },
+            "value": "continuity"
+          },
+          "options": [
+            {
+              "text": {
+                "type": "plain_text",
+                "text": "Cybersecurity"
+              },
+              "value": "cyber"
+            },
+            {
+              "text": {
+                "type": "plain_text",
+                "text": "Privacy"
+              },
+              "value": "privacy"
+            },
+            {
+              "text": {
+                "type": "plain_text",
+                "text": "Business Continuity"
+              },
+              "value": "continuity"
+            },
+            {
+              "text": {
+                "type": "plain_text",
+                "text": "ESG"
+              },
+              "value": "esg"
+            },
+            {
+              "text": {
+                "type": "plain_text",
+                "text": "Crisis Comms"
+              },
+              "value": "crisis"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:rotating_light: Infrastructure loss*  ·  Critical\n2 incidents"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Data-center outage*\n• Regional power / network failure\n• Cooling / hardware failure"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Scenarios — power / network",
+            "emoji": true
+          },
+          "action_id": "threat_scenarios",
+          "value": "continuity:infra:dc:power",
+          "style": "primary"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Critical system unavailable*\n• Core application failure"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Scenarios — app failure",
+            "emoji": true
+          },
+          "action_id": "threat_scenarios",
+          "value": "continuity:infra:app:crash"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:warning: Supplier & workforce*  ·  High\n2 incidents"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Open incidents",
+            "emoji": true
+          },
+          "action_id": "threat_open",
+          "value": "continuity:supwf"
+        }
+      ]
+    }
+  ]
+}

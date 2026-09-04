@@ -1,0 +1,183 @@
+{
+  "type": "home",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "TestMyPlan command center",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Veridian Health  ·  Alex Morgan, Head of Resilience"
+        }
+      ]
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Home",
+            "emoji": true
+          },
+          "action_id": "home_tab",
+          "value": "home",
+          "style": "primary"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Teams",
+            "emoji": true
+          },
+          "action_id": "home_tab",
+          "value": "teams"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Tests",
+            "emoji": true
+          },
+          "action_id": "home_tab",
+          "value": "tests"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Report",
+            "emoji": true
+          },
+          "action_id": "home_tab",
+          "value": "report"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Readiness across every plan",
+        "emoji": true
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Your team's summary — assigned teams, module scores, mean response time, and open drills."
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Plans under test*\n31\n_across 5 domains_"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Avg preparedness*\n74 / 100\n_Grade B · improving_"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Mean time to act*\n1m 40s\n_Median MTTA_"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Preparedness by module*"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":large_green_square: *Cybersecurity*  82   `8/9 plans tested`\n:large_green_square: *Crisis Comms*  77\n:large_yellow_square: *Business Continuity*  74\n:large_yellow_square: *Privacy*  68\n:large_orange_square: *ESG*  61"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Mitigation / drill windows*\n:red_circle: Critical — 2 days    :large_orange_circle: High — 4 days    :large_yellow_circle: Medium — 2 weeks    :white_circle: Low — 4 weeks"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Open action items*"
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Total*\n14"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*High severity*\n6"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Closed this week*\n3"
+        }
+      ]
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Launch a test",
+            "emoji": true
+          },
+          "action_id": "home_launch",
+          "value": "launch",
+          "style": "danger"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Open command channel",
+            "emoji": true
+          },
+          "action_id": "home_channel",
+          "value": "cc"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "BC plan drafted from Veridian-BIA-2026.xlsx and ready to test.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Business Continuity · BIA",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":white_check_mark: *Plan ready*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "BC plan drafted from *Veridian-BIA-2026.xlsx* and ready to test."
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Critical processes*\n4"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Target RTO*\n4h"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Target RPO*\n15m"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Runbooks drafted*\n2"
+        }
+      ]
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Show test scenarios",
+            "emoji": true
+          },
+          "action_id": "bia_scenarios",
+          "value": "next",
+          "style": "primary"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Works for every module — upload playbooks or policies and the system builds plans in your organization's context."
+        }
+      ]
+    }
+  ]
+}

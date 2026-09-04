@@ -7,13 +7,13 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from accounts.models import User
+from cards.loader import load_card
+from cards.slack_client import SlackApiError, publish_home_card
 from commands.slack_signature import SlackSignatureError, verify_slack_signature
 from plans.intake import handle_dm_message_event
-from workspaces.models import get_bot_token
+from workspaces.models import Workspace, get_bot_token
 
 from .models import ProcessedSlackEvent
-from .slack_client import SlackApiError, publish_home_view
-from .view_builder import build_home_view
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def slack_events(request):
         bot_token = get_bot_token(team_id)
 
         if event.get("type") == "app_home_opened" and event.get("tab") == "home":
-            _handle_app_home_opened(event, bot_token)
+            _handle_app_home_opened(event, team_id, bot_token)
 
         elif (
             event.get("type") == "message"
@@ -84,12 +84,16 @@ def _claim_event(event_id: str) -> bool:
         return False
 
 
-def _handle_app_home_opened(event, bot_token):
+def _handle_app_home_opened(event, team_id, bot_token):
     slack_user_id = event.get("user", "")
     user = User.objects(slack_account__slack_user_id=slack_user_id).first()
+    workspace = Workspace.objects(team_id=team_id).first()
 
-    view = build_home_view(user)
+    org_name = workspace.team_name if workspace else ""
+    person_name = user.name if user else ""
+    card = load_card("25-app-home.json", org_name=org_name, person_name=person_name)
+
     try:
-        publish_home_view(slack_user_id, view, bot_token)
+        publish_home_card(slack_user_id, card, bot_token)
     except SlackApiError:
         logger.exception("Failed to publish Slack Home tab for user %s", slack_user_id)

@@ -1,0 +1,13 @@
+{
+  "channel": "#ir-war-room",
+  "text": "Channel created · #ir-war-room — Incident Response Team invited.",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":hash: *Channel created · #ir-war-room*\nIncident Response Team invited · Sofia Reyes, Tomas Kruger"
+      }
+    }
+  ]
+}

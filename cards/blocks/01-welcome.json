@@ -1,0 +1,65 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "Welcome, Alex. Your command center is live.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Welcome, Alex. Your command center is live.",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":dart: *Getting started*  ·  :white_check_mark: Connected"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "This channel is where *Veridian Health* plans, runs, and reviews every readiness test."
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*How it works*\n*1.* Build your admin team — share the load by module\n*2.* Stand up the mandatory response teams\n*3.* Review your threat map and pick a scenario\n*4.* Trigger the test — everyone takes part right here"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Build my admin team",
+            "emoji": true
+          },
+          "action_id": "welcome_build_admin",
+          "value": "next",
+          "style": "primary"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Every step is a button — no commands to memorize."
+        }
+      ]
+    }
+  ]
+}

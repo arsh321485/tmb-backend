@@ -1,0 +1,53 @@
+{
+  "channel": "#general",
+  "text": "Weekly digest — preparedness 74.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Where we stand",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":bar_chart: *Weekly digest*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Teams onboarded*\n4"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*People assigned*\n6"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Tests this quarter*\n7"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Preparedness*\n74"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Full breakdown lives in #testmyplan-command-center"
+        }
+      ]
+    }
+  ]
+}

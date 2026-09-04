@@ -1,0 +1,75 @@
+{
+  "channel": "#privacy-bridge",
+  "text": "Notification duty — is this a notifiable personal-data breach?",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Notification duty",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":lock: *Required*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Is this a notifiable personal-data breach?*"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Notifiable",
+            "emoji": true
+          },
+          "action_id": "decide_notify",
+          "value": "yes",
+          "style": "danger"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Not notifiable",
+            "emoji": true
+          },
+          "action_id": "decide_notify",
+          "value": "no"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Need vendor evidence",
+            "emoji": true
+          },
+          "action_id": "decide_notify",
+          "value": "wait"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":rotating_light: Notifiable — Special-category data · notify within 72h\n:memo: Not notifiable — Document the reasoning only\n:hourglass: Need evidence — Pauses the clock at your own risk"
+        }
+      ]
+    }
+  ]
+}

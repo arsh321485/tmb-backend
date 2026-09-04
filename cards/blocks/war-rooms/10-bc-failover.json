@@ -1,0 +1,75 @@
+{
+  "channel": "#bc-war-room",
+  "text": "Failover decision — Payroll can't fail over inside the RTO.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Failover decision",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":hourglass_flowing_sand: *Awaiting call*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Payroll can't fail over inside the RTO. How do you proceed?*"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Force DNS cutover",
+            "emoji": true
+          },
+          "action_id": "decide_failover",
+          "value": "dns",
+          "style": "danger"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Run payroll manually",
+            "emoji": true
+          },
+          "action_id": "decide_failover",
+          "value": "manual"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Accept RTO breach",
+            "emoji": true
+          },
+          "action_id": "decide_failover",
+          "value": "breach"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Force DNS — Meets RTO · brief session loss\nManual — Documented workaround · 2 people\nAccept breach — Wait out TTL · logged as a miss"
+        }
+      ]
+    }
+  ]
+}

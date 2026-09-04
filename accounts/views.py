@@ -9,6 +9,8 @@ from django.views.decorators.http import require_GET
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from cards.onboarding import send_welcome
+
 from .models import SlackAccount, TeamsAccount, User
 from workspaces.models import Workspace
 
@@ -120,7 +122,9 @@ def slack_callback(request):
     if not bot_token or not team_id:
         return _redirect_to_frontend(error="slack_install_incomplete")
 
-    workspace = Workspace.objects(team_id=team_id).first() or Workspace(team_id=team_id)
+    existing_workspace = Workspace.objects(team_id=team_id).first()
+    is_new_workspace = existing_workspace is None
+    workspace = existing_workspace or Workspace(team_id=team_id)
     workspace.team_name = team.get("name", workspace.team_name)
     workspace.bot_token = bot_token
     workspace.bot_user_id = bot_user_id
@@ -152,6 +156,9 @@ def slack_callback(request):
         access_token=bot_token,
     )
     user.save()
+
+    if is_new_workspace:
+        send_welcome(authed_user_id, team.get("name", ""), display_name, bot_token)
 
     _log_user_in(request, user)
     return _redirect_to_frontend()

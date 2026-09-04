@@ -1,0 +1,39 @@
+{
+  "channel": "#bc-war-room",
+  "text": "Inject · Backup complication — High.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Inject · Backup complication",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":fire: *High*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Latest snapshot fails its integrity check — the recovery point slips to *26 hours*."
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Posted to the war room · timings feed the preparedness score."
+        }
+      ]
+    }
+  ]
+}

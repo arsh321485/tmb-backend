@@ -1,0 +1,66 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "Preparedness report — overall 74.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Preparedness report",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":bar_chart: *Overall 74 · Grade B*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Tests this quarter*\n7"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Median MTTA*\n1m 40s"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Plan coverage*\n68%"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Preparedness by module*\n:large_green_square: Cybersecurity — *82*  `+3`\n:large_green_square: Crisis Comms — *77*  `+4`\n:large_yellow_square: Business Continuity — *74*  `+6`\n:large_yellow_square: Privacy — *68*  `-2`\n:large_orange_square: ESG — *61*  `+1`"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Email me the PDF",
+            "emoji": true
+          },
+          "action_id": "report_email",
+          "value": "pdf",
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "Regional Data-Center Failover is live in the war room.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Regional Data-Center Failover",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":fire: *Live now*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "The test is running in the war room. You can watch, inject complications, or pull the report at any time."
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Participants notified*\n6"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Injects queued*\n3"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Scoring*\nOn"
+        }
+      ]
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Preparedness report",
+            "emoji": true
+          },
+          "action_id": "live_report",
+          "value": "report"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Inject a scenario",
+            "emoji": true
+          },
+          "action_id": "live_inject",
+          "value": "inject",
+          "style": "danger"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Run another test",
+            "emoji": true
+          },
+          "action_id": "live_new",
+          "value": "new"
+        }
+      ]
+    }
+  ]
+}

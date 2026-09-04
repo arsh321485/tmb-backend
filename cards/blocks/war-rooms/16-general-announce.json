@@ -1,0 +1,53 @@
+{
+  "channel": "#general",
+  "text": "TestMyPlan is live at Veridian Health.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "TestMyPlan is live at Veridian Health",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":mega: *Announcement*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "We test our response plans here now — no offsite days, no slide decks. If you're on a response team you'll get a DM when a drill starts, and everything happens in your war-room channel."
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*1.* Drills run in chat and take 20–40 minutes\n*2.* Every decision is timestamped as audit evidence\n*3.* Scores are for the plan, not for people"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Show my assignments",
+            "emoji": true
+          },
+          "action_id": "announce_assign",
+          "value": "me",
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}

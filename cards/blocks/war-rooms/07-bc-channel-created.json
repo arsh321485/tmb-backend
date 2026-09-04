@@ -1,0 +1,13 @@
+{
+  "channel": "#bc-war-room",
+  "text": "Channel created · #bc-war-room — Business Continuity Team invited.",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":hash: *Channel created · #bc-war-room*\nBusiness Continuity Team invited · James Whitfield, Kenji Sato"
+      }
+    }
+  ]
+}

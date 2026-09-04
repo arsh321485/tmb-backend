@@ -23,4 +23,5 @@ urlpatterns = [
     path("api/auth/", include("accounts.urls")),
     path("api/commands/", include("commands.urls")),
     path("api/events/", include("home_tab.urls")),
+    path("api/interactivity/", include("cards.urls")),
 ]

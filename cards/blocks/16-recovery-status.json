@@ -1,0 +1,84 @@
+{
+  "channel": "#bc-war-room",
+  "text": "Recovery status — RTO clock running.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Recovery status",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":alarm_clock: *RTO clock running*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Elapsed*\n28m 02s"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Target RTO*\n4h"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Target RPO*\n15m"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Apps served*\n3/4"
+        }
+      ]
+    },
+    {
+      "type": "actions",
+      "block_id": "bc_checklist",
+      "elements": [
+        {
+          "type": "checkboxes",
+          "action_id": "bc_steps",
+          "options": [
+            {
+              "text": {
+                "type": "mrkdwn",
+                "text": "Fail over core systems to the secondary region"
+              },
+              "value": "failover"
+            },
+            {
+              "text": {
+                "type": "mrkdwn",
+                "text": "Verify data integrity at the recovery point"
+              },
+              "value": "integrity"
+            },
+            {
+              "text": {
+                "type": "mrkdwn",
+                "text": "Confirm critical apps are serving traffic"
+              },
+              "value": "apps"
+            },
+            {
+              "text": {
+                "type": "mrkdwn",
+                "text": "Update staff on system status"
+              },
+              "value": "staff"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

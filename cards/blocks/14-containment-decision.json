@@ -1,0 +1,75 @@
+{
+  "channel": "#ir-war-room",
+  "text": "Containment call · MTTD 2m 04s — Encryption is spreading laterally.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Containment call · MTTD 2m 04s",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":warning: *Decision required*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Encryption is spreading laterally. What do you do first?*"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Isolate the VLAN",
+            "emoji": true
+          },
+          "action_id": "decide_contain",
+          "value": "isolate_vlan",
+          "style": "danger"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Quarantine the 14 hosts",
+            "emoji": true
+          },
+          "action_id": "decide_contain",
+          "value": "quarantine"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Wait for more telemetry",
+            "emoji": true
+          },
+          "action_id": "decide_contain",
+          "value": "wait"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":zap: Isolate — Cuts spread · 40 users offline\n:knife: Quarantine — Surgical · slower than spread\n:hourglass: Wait — Preserves uptime · accepts risk"
+        }
+      ]
+    }
+  ]
+}

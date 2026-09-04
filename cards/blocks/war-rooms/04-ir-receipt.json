@@ -1,0 +1,13 @@
+{
+  "channel": "#ir-war-room",
+  "text": "Containment decision logged · Quarantine the 14 hosts.",
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":white_check_mark: *Containment decision logged · Quarantine the 14 hosts*\nSofia Reyes · 05:15 from trigger"
+      }
+    }
+  ]
+}

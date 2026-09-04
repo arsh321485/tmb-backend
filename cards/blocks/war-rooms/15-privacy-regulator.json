@@ -1,0 +1,56 @@
+{
+  "channel": "#privacy-bridge",
+  "text": "Regulator notification drafted for admin approval.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Regulator notification",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":page_facing_up: *Drafted for you*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Pre-filled from the incident record: controller details, categories of data, approximate number of data subjects, containment measures and the DPO contact."
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Send for approval",
+            "emoji": true
+          },
+          "action_id": "draft_approve",
+          "value": "send",
+          "style": "primary"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Request changes",
+            "emoji": true
+          },
+          "action_id": "draft_changes",
+          "value": "edit"
+        }
+      ]
+    }
+  ]
+}

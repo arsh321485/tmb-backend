@@ -1,0 +1,56 @@
+{
+  "channel": "@Sofia Reyes",
+  "text": "You have been assigned IR Lead on the Incident Response Team.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Your role on Incident Response Team",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":bell: *DM to Sofia Reyes*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: IR Lead*\nIncident Response Team · Cybersecurity"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Your responsibilities*\n*1.* Triage alerts and declare incidents\n*2.* Run containment decisions on the bridge\n*3.* Keep the command center updated"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Acknowledge role",
+            "emoji": true
+          },
+          "action_id": "role_ack",
+          "value": "ir:SR",
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}

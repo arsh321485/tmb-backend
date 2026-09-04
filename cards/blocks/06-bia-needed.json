@@ -1,0 +1,55 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "No BC plan on file. Upload your Business Impact Analysis.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Business Continuity · BIA",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":page_facing_up: *Needed before testing*"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "No BC plan on file. Upload your Business Impact Analysis — TestMyPlan reads it and drafts the plan this test will exercise."
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Upload BIA (.pdf / .xlsx)",
+            "emoji": true
+          },
+          "action_id": "bia_upload",
+          "value": "open",
+          "style": "primary"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "Works for every module — upload playbooks or policies and the system builds plans in your organization's context."
+        }
+      ]
+    }
+  ]
+}

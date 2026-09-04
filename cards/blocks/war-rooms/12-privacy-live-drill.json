@@ -1,0 +1,56 @@
+{
+  "channel": "#privacy-bridge",
+  "text": "Live drill · Lost Device / PII Exposure.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Lost Device / PII Exposure",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":dart: *Live drill · Privacy*  ·  :red_circle: Running"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Marco Castellanos*\nPrivacy Counsel · Lead"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*:bust_in_silhouette: Priya Adeyemi*\nRisk & Compliance · Member"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Objectives being scored*\n*1.* Assess notification duty on the 72-hour clock\n*2.* Own regulator communications"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": "This is a test. Nothing you do here touches production systems."
+        }
+      ]
+    }
+  ]
+}

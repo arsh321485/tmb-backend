@@ -1,0 +1,67 @@
+{
+  "channel": "#testmyplan-command-center",
+  "text": "Step 5 · Test plan — Regional Data-Center Failover.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Regional Data-Center Failover",
+        "emoji": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": ":clipboard: *Step 5 · Test plan*  ·  12 steps"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*1 · Trigger & declaration*\n• Validate the outage alert\n• Declare a BC event and open the war room\n• Notify the BC team and executives"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*2 · Failover execution*\n• Fail over core systems to the secondary region\n• Verify data integrity at the recovery point\n• Confirm critical apps are serving traffic"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*3 · Communication*\n• Update staff on system status\n• Brief customer-facing teams with holding lines"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*4 · Validation & return*\n• Measure RTO / RPO against the plan\n• Plan the return to primary\n• Log evidence for the report"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Arm this test",
+            "emoji": true
+          },
+          "action_id": "plan_arm",
+          "value": "arm",
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}
