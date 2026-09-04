@@ -92,7 +92,7 @@ SLACK_SCOPES = config("SLACK_SCOPES", default="openid,email,profile")
 # in the Slack app dashboard, or the install will be rejected.
 SLACK_BOT_SCOPES = config(
     "SLACK_BOT_SCOPES",
-    default="channels:history,channels:manage,chat:write,commands,files:read,im:history,users:read",
+    default="channels:history,channels:manage,chat:write,commands,files:read,im:history,users:read,users:read.email",
 )
 # Used to verify that a slash-command request really came from Slack.
 # Find it in api.slack.com/apps -> your app -> Basic Information -> Signing Secret.
