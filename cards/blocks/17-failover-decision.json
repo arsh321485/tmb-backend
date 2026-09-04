@@ -47,7 +47,7 @@
             "text": "Run payroll manually",
             "emoji": true
           },
-          "action_id": "decide_failover",
+          "action_id": "decide_failover__manual",
           "value": "manual"
         },
         {
@@ -57,7 +57,7 @@
             "text": "Accept RTO breach",
             "emoji": true
           },
-          "action_id": "decide_failover",
+          "action_id": "decide_failover__breach",
           "value": "breach"
         }
       ]

@@ -65,11 +65,17 @@ def handle_block_action(payload: dict) -> None:
         return
 
     action_id = actions[0].get("action_id", "")
-    if action_id not in _ADVANCE_MAP:
+    # Some cards have several buttons that used to share one action_id
+    # (invalid in Slack -- see the "invalid_blocks" fix) and now look like
+    # "threat_jump__continuity_infra". Match on the part before "__" so
+    # they still route the same way regardless of which option was picked.
+    lookup_id = action_id.split("__", 1)[0]
+
+    if lookup_id not in _ADVANCE_MAP:
         logger.info("No handler wired yet for action_id=%s", action_id)
         return
 
-    next_card_file = _ADVANCE_MAP[action_id]
+    next_card_file = _ADVANCE_MAP[lookup_id]
     if next_card_file is None:
         return  # acknowledged, nothing to change on screen
 

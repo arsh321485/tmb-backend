@@ -53,7 +53,7 @@
             "text": "External attacker · Cyber",
             "emoji": true
           },
-          "action_id": "threat_jump",
+          "action_id": "threat_jump__cyber_ext",
           "value": "cyber:ext"
         },
         {
@@ -63,7 +63,7 @@
             "text": "Personal-data breach · Privacy",
             "emoji": true
           },
-          "action_id": "threat_jump",
+          "action_id": "threat_jump__privacy_breach",
           "value": "privacy:breach"
         }
       ]
@@ -174,7 +174,7 @@
             "text": "Scenarios — app failure",
             "emoji": true
           },
-          "action_id": "threat_scenarios",
+          "action_id": "threat_scenarios__continuity_infra_app_crash",
           "value": "continuity:infra:app:crash"
         }
       ]

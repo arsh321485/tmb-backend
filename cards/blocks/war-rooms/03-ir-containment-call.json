@@ -47,7 +47,7 @@
             "text": "Quarantine the 14 hosts",
             "emoji": true
           },
-          "action_id": "decide_contain",
+          "action_id": "decide_contain__quarantine",
           "value": "quarantine"
         },
         {
@@ -57,7 +57,7 @@
             "text": "Wait for more telemetry",
             "emoji": true
           },
-          "action_id": "decide_contain",
+          "action_id": "decide_contain__wait",
           "value": "wait"
         }
       ]
