@@ -23,6 +23,140 @@ PEOPLE = [
 ]
 MODULES = ["All modules", "Cybersecurity", "Privacy", "Business Continuity", "ESG", "Crisis Comms"]
 
+RESPONSE_TEAMS = [
+    {
+        "team": "Incident Response Team",
+        "module": "Cybersecurity",
+        "members": [
+            {"code": "SR", "name": "Sofia Reyes", "role": "IR Lead"},
+            {"code": "TK", "name": "Tomas Kruger", "role": "SOC Analyst"},
+        ],
+    },
+    {
+        "team": "Business Continuity Team",
+        "module": "Business Continuity",
+        "members": [
+            {"code": "JW", "name": "James Whitfield", "role": "BC Lead"},
+            {"code": "KS", "name": "Kenji Sato", "role": "IT Operations"},
+        ],
+    },
+    {
+        "team": "Privacy Response Team",
+        "module": "Privacy",
+        "members": [{"code": "MC", "name": "Marco Castellanos", "role": "Privacy Counsel"}],
+    },
+    {
+        "team": "Crisis Comms Team",
+        "module": "Crisis Comms",
+        "members": [{"code": "LB", "name": "Lena Bianchi", "role": "Comms Lead"}],
+    },
+]
+RESPONSE_TEAM_MEMBER_COUNT = sum(len(t["members"]) for t in RESPONSE_TEAMS)
+
+
+def build_response_teams_card(team_id: str, org_name: str = "") -> dict:
+    from .models import get_or_create_state
+
+    state = get_or_create_state(team_id)
+    added = set(state.response_members_added)
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Step 2 · Response teams", "emoji": True}},
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f":shield: *Mandatory teams*  ·  {len(added)} / {RESPONSE_TEAM_MEMBER_COUNT} filled",
+                }
+            ],
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"Add each member -- {org_name or 'your org'} teams are tracked here. "
+                    "You can also build your own teams for anything else."
+                ),
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Add all suggested members", "emoji": True},
+                    "action_id": "team_add_all",
+                    "value": "all",
+                }
+            ],
+        },
+        {"type": "divider"},
+    ]
+
+    for team in RESPONSE_TEAMS:
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{team['team']}*\n{team['module']}"},
+            }
+        )
+        for member in team["members"]:
+            code = member["code"]
+            value = f"{team['team']}:{member['role']}:{code}"
+            is_added = code in added
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*:bust_in_silhouette: {member['name']}* — {member['role']}",
+                    },
+                }
+            )
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "✓ Notified — click to remove" if is_added else f"Add {member['name'].split()[0]}",
+                                "emoji": True,
+                            },
+                            "action_id": "team_add",
+                            "value": value,
+                        }
+                    ],
+                }
+            )
+        blocks.append({"type": "divider"})
+
+    blocks.append(
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Create a team", "emoji": True},
+                    "action_id": "team_create",
+                    "value": "open",
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Teams ready — show my threat map", "emoji": True},
+                    "action_id": "teams_done",
+                    "value": "next",
+                    "style": "primary",
+                },
+            ],
+        }
+    )
+
+    return {"blocks": blocks}
+
 
 def build_admin_team_card(
     team_id: str, org_name: str = "", person_name: str = "",

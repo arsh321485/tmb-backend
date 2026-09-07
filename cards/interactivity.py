@@ -28,7 +28,7 @@ from cards.create_team_modal import handle_add_member_click, handle_submission, 
 from cards.loader import load_card
 from cards.models import get_or_create_state
 from cards.nav import card_file_for_nav_key, nav_key_for_card_file, with_nav_bar
-from cards.render import build_admin_team_card
+from cards.render import build_admin_team_card, build_response_teams_card
 from home_tab.models import ProcessedSlackEvent
 from workspaces.models import Workspace, get_bot_token
 
@@ -137,6 +137,38 @@ def handle_block_action(payload: dict) -> None:
         _redraw_admin_card(team_id, response_url)
         return
 
+    # Response teams card: "Add Sofia" etc. toggles that person's real
+    # notified/added status (same self-correcting pattern as admin_add).
+    # Can't send a genuine DM though -- these are the same mock names as
+    # the admin list, not real Slack accounts.
+    if action_id == "team_add":
+        *_rest, code = actions[0].get("value", "").split(":")
+        state = get_or_create_state(team_id)
+        if code:
+            if code in state.response_members_added:
+                state.response_members_added.remove(code)
+            else:
+                state.response_members_added.append(code)
+            state.save()
+        _redraw_response_card(team_id, response_url)
+        return
+
+    if action_id == "team_add_all":
+        from cards.render import RESPONSE_TEAMS
+
+        state = get_or_create_state(team_id)
+        all_codes = [m["code"] for t in RESPONSE_TEAMS for m in t["members"]]
+        state.response_members_added = all_codes
+        state.save()
+        _redraw_response_card(team_id, response_url)
+        return
+
+    if action_id == "teams_done":
+        channel_id = payload.get("channel", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        if channel_id and bot_token:
+            _post_response_team_summary(team_id, channel_id, bot_token)
+
     # The nav bar (see nav.py) -- jump straight to any of the 5 main steps,
     # not just move forward one at a time.
     if action_id.startswith("nav_jump__"):
@@ -167,6 +199,8 @@ def handle_block_action(payload: dict) -> None:
 
     if next_card_file == "02-admin-team.json":
         card = build_admin_team_card(team_id, org_name=org_name, person_name=person_name)
+    elif next_card_file == "03-response-teams.json":
+        card = build_response_teams_card(team_id, org_name=org_name)
     else:
         card = load_card(next_card_file, org_name=org_name, person_name=person_name)
 
@@ -205,6 +239,38 @@ def _redraw_admin_card(team_id: str, response_url: str, expanded_code: str = "",
     )
     card = with_nav_bar(card, "admin")
     _replace_message(response_url, card)
+
+
+def _redraw_response_card(team_id: str, response_url: str) -> None:
+    workspace = Workspace.objects(team_id=team_id).first()
+    org_name = workspace.team_name if workspace else ""
+    card = build_response_teams_card(team_id, org_name=org_name)
+    card = with_nav_bar(card, "teams")
+    _replace_message(response_url, card)
+
+
+def _post_response_team_summary(team_id: str, channel_id: str, bot_token: str) -> None:
+    from cards.render import RESPONSE_TEAMS
+
+    state = get_or_create_state(team_id)
+    if not state.response_members_added:
+        return
+
+    added = set(state.response_members_added)
+    names_by_code = {
+        m["code"]: (m["name"], m["role"]) for t in RESPONSE_TEAMS for m in t["members"]
+    }
+    lines = "\n".join(
+        f"• *{names_by_code[code][0]}* -- {names_by_code[code][1]}"
+        for code in added
+        if code in names_by_code
+    )
+    requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={"Authorization": f"Bearer {bot_token}"},
+        json={"channel": channel_id, "text": f":shield: Response teams confirmed:\n{lines}"},
+        timeout=10,
+    )
 
 
 def handle_view_submission(payload: dict) -> None:

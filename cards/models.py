@@ -24,6 +24,10 @@ class WizardState(me.Document):
     # {"PA": "Cybersecurity", "MC": "All modules"} -- which module each
     # confirmed admin is responsible for. Presence as a key = confirmed.
     admin_modules = me.DictField(default=dict)
+    # ["SR", "TK", ...] -- suggested response team members actually added
+    # (real people can't be genuinely DM'd since these are mock names, but
+    # the "added"/"notified" status is tracked for real).
+    response_members_added = me.ListField(me.StringField(), default=list)
     custom_teams = me.EmbeddedDocumentListField(CustomTeam, default=list)
 
     # strict=False: tolerate old field names left over in already-saved
