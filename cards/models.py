@@ -26,7 +26,10 @@ class WizardState(me.Document):
     admin_modules = me.DictField(default=dict)
     custom_teams = me.EmbeddedDocumentListField(CustomTeam, default=list)
 
-    meta = {"collection": "wizard_states"}
+    # strict=False: tolerate old field names left over in already-saved
+    # documents from before a schema change (e.g. admins_added ->
+    # admin_modules), instead of crashing every read for that workspace.
+    meta = {"collection": "wizard_states", "strict": False}
 
 
 def get_or_create_state(team_id: str) -> WizardState:

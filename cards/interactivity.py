@@ -117,6 +117,16 @@ def handle_block_action(payload: dict) -> None:
         _redraw_admin_card(team_id, response_url)
         return
 
+    # "Continue -- set up response teams": post a permanent summary of who
+    # was confirmed before moving on, so that decision isn't just lost when
+    # the card gets replaced by the next step (also doubles as an audit
+    # trail, per the tracker's "immutable transcript" requirement).
+    if action_id == "admin_done":
+        channel_id = payload.get("channel", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        if channel_id and bot_token:
+            _post_admin_summary(team_id, channel_id, bot_token)
+
     if action_id == "admin_add":
         # The confirmed-admin row's own button: "✓ Admin -- click to remove".
         person_code = actions[0].get("value", "")
@@ -165,6 +175,26 @@ def handle_block_action(payload: dict) -> None:
         card = with_nav_bar(card, nav_key)
 
     _replace_message(response_url, card)
+
+
+def _post_admin_summary(team_id: str, channel_id: str, bot_token: str) -> None:
+    from cards.render import PEOPLE
+
+    state = get_or_create_state(team_id)
+    if not state.admin_modules:
+        return
+
+    names_by_code = {p["code"]: p["name"] for p in PEOPLE}
+    lines = "\n".join(
+        f"• *{names_by_code.get(code, code)}* added to the admin team -- _{module}_"
+        for code, module in state.admin_modules.items()
+    )
+    requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={"Authorization": f"Bearer {bot_token}"},
+        json={"channel": channel_id, "text": f":white_check_mark: Admin team confirmed:\n{lines}"},
+        timeout=10,
+    )
 
 
 def _redraw_admin_card(team_id: str, response_url: str, expanded_code: str = "", selected_module: str = "") -> None:
