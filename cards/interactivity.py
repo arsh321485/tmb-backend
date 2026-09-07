@@ -91,13 +91,18 @@ def handle_block_action(payload: dict) -> None:
             open_modal(trigger_id, channel_id, bot_token)
         return
 
-    # "Add Priya" etc -- actually persist the addition (WizardState) and
-    # re-render the admin team card reflecting it, instead of a no-op.
+    # "Add Priya" etc -- persists the addition (WizardState) and re-renders
+    # the card reflecting it. Toggles: clicking an already-added person's
+    # button removes them again, so an accidental add is self-correcting
+    # without a separate delete button.
     if action_id == "admin_add":
         person_code = actions[0].get("value", "")
         state = get_or_create_state(team_id)
-        if person_code and person_code not in state.admins_added:
-            state.admins_added.append(person_code)
+        if person_code:
+            if person_code in state.admins_added:
+                state.admins_added.remove(person_code)
+            else:
+                state.admins_added.append(person_code)
             state.save()
 
         workspace = Workspace.objects(team_id=team_id).first()
