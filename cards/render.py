@@ -1,30 +1,177 @@
 """
-Renders a card with real tracked state merged in, instead of the static
-prototype JSON as-is. So far only the admin-team card (02) needs this --
-"N added" and each "Add X" button reflecting whether that person has
-actually been added (WizardState), not just always showing "0 added".
+Renders the admin-team card from real tracked state (WizardState),
+instead of the static prototype JSON as-is.
+
+Each person can be in one of 3 states:
+- collapsed, not added: just an "Add" button
+- expanded: picking which module they're admin for, before confirming
+  (their own choice, independent of the other 3 people)
+- collapsed, added: shows which module they were confirmed for, with a
+  single button that removes them again (no separate delete button --
+  the same click undoes it)
+
+Note: a colored highlight/background for the "added" row (as in the
+prototype) isn't possible -- Slack section blocks don't support custom
+backgrounds. The checkmark and module label are the real equivalent.
 """
 
-from .loader import load_card
-from .models import get_or_create_state
+PEOPLE = [
+    {"code": "PA", "name": "Priya Adeyemi", "suggested_role": "Risk & Compliance"},
+    {"code": "MC", "name": "Marco Castellanos", "suggested_role": "Privacy Counsel"},
+    {"code": "JW", "name": "James Whitfield", "suggested_role": "Infrastructure / BC"},
+    {"code": "LB", "name": "Lena Bianchi", "suggested_role": "Communications"},
+]
+MODULES = ["All modules", "Cybersecurity", "Privacy", "Business Continuity", "ESG", "Crisis Comms"]
 
-ADMIN_TEAM_CARD = "02-admin-team.json"
 
+def build_admin_team_card(
+    team_id: str, org_name: str = "", person_name: str = "",
+    expanded_code: str = "", selected_module: str = "",
+) -> dict:
+    from .models import get_or_create_state
 
-def build_admin_team_card(team_id: str, org_name: str = "", person_name: str = "") -> dict:
-    card = load_card(ADMIN_TEAM_CARD, org_name=org_name, person_name=person_name)
     state = get_or_create_state(team_id)
-    added = set(state.admins_added)
+    admin_modules = state.admin_modules or {}
 
-    for block in card["blocks"]:
-        if block.get("type") == "context":
-            for element in block.get("elements", []):
-                if "added" in element.get("text", ""):
-                    element["text"] = f":busts_in_silhouette: *Share the load*  ·  {len(added)} added"
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Step 1 · Admin team", "emoji": True}},
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f":busts_in_silhouette: *Share the load*  ·  {len(admin_modules)} added",
+                }
+            ],
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Each admin can run every module, or only the ones under their responsibility.",
+            },
+        },
+        {"type": "divider"},
+    ]
 
-        if block.get("type") == "actions":
-            for button in block.get("elements", []):
-                if button.get("action_id") == "admin_add" and button.get("value") in added:
-                    button["text"]["text"] = "✓ Added"
+    for person in PEOPLE:
+        code = person["code"]
+        if code == expanded_code:
+            blocks.extend(_expanded_person_blocks(person, selected_module or "All modules"))
+        elif code in admin_modules:
+            blocks.extend(_confirmed_person_blocks(person, admin_modules[code]))
+        else:
+            blocks.extend(_collapsed_person_blocks(person))
+        blocks.append({"type": "divider"})
 
-    return card
+    blocks.append(
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Continue — set up response teams", "emoji": True},
+                    "action_id": "admin_done",
+                    "value": "next",
+                    "style": "primary",
+                }
+            ],
+        }
+    )
+
+    return {"blocks": blocks}
+
+
+def _collapsed_person_blocks(person: dict) -> list:
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*:bust_in_silhouette: {person['name']}*\n{person['suggested_role']}",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": f"Add {person['name'].split()[0]}", "emoji": True},
+                    "action_id": "admin_expand",
+                    "value": person["code"],
+                }
+            ],
+        },
+    ]
+
+
+def _expanded_person_blocks(person: dict, selected_module: str) -> list:
+    code = person["code"]
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*:bust_in_silhouette: {person['name']}*\n{person['suggested_role']}",
+            },
+        },
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": "*Module responsibility*"}]},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": module, "emoji": True},
+                    # action_id must be unique per message -- give each
+                    # module button its own (see the "invalid_blocks" fix
+                    # applied elsewhere for the same underlying mistake).
+                    "action_id": f"admin_pick_module__{module.replace(' ', '_')}",
+                    "value": f"{code}:{module}",
+                    **({"style": "primary"} if module == selected_module else {}),
+                }
+                for module in MODULES
+            ],
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": f"+ Add as admin ({selected_module})", "emoji": True},
+                    "action_id": "admin_confirm",
+                    "value": f"{code}:{selected_module}",
+                    "style": "primary",
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Cancel", "emoji": True},
+                    "action_id": "admin_cancel",
+                    "value": code,
+                },
+            ],
+        },
+    ]
+
+
+def _confirmed_person_blocks(person: dict, module: str) -> list:
+    code = person["code"]
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f":white_check_mark: *{person['name']}*\n_{module}_",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "✓ Admin — click to remove", "emoji": True},
+                    "action_id": "admin_add",
+                    "value": code,
+                }
+            ],
+        },
+    ]

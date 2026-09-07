@@ -21,7 +21,9 @@ class WizardState(me.Document):
     """
 
     team_id = me.StringField(required=True, unique=True)
-    admins_added = me.ListField(me.StringField(), default=list)  # e.g. ["PA", "MC"]
+    # {"PA": "Cybersecurity", "MC": "All modules"} -- which module each
+    # confirmed admin is responsible for. Presence as a key = confirmed.
+    admin_modules = me.DictField(default=dict)
     custom_teams = me.EmbeddedDocumentListField(CustomTeam, default=list)
 
     meta = {"collection": "wizard_states"}

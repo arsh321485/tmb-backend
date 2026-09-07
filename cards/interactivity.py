@@ -91,25 +91,40 @@ def handle_block_action(payload: dict) -> None:
             open_modal(trigger_id, channel_id, bot_token)
         return
 
-    # "Add Priya" etc -- persists the addition (WizardState) and re-renders
-    # the card reflecting it. Toggles: clicking an already-added person's
-    # button removes them again, so an accidental add is self-correcting
-    # without a separate delete button.
-    if action_id == "admin_add":
-        person_code = actions[0].get("value", "")
-        state = get_or_create_state(team_id)
-        if person_code:
-            if person_code in state.admins_added:
-                state.admins_added.remove(person_code)
-            else:
-                state.admins_added.append(person_code)
-            state.save()
+    # Admin team card: expand a person to choose their module, change that
+    # choice, confirm (commits to WizardState), cancel (discards), or
+    # remove an already-confirmed admin. All of these just redraw the same
+    # card differently -- nothing except "confirm"/"remove" is saved.
+    if action_id == "admin_expand":
+        _redraw_admin_card(team_id, response_url, expanded_code=actions[0].get("value", ""))
+        return
 
-        workspace = Workspace.objects(team_id=team_id).first()
-        org_name = workspace.team_name if workspace else ""
-        card = build_admin_team_card(team_id, org_name=org_name)
-        card = with_nav_bar(card, "admin")
-        _replace_message(response_url, card)
+    if action_id.startswith("admin_pick_module__"):
+        code, _, module = actions[0].get("value", "").partition(":")
+        _redraw_admin_card(team_id, response_url, expanded_code=code, selected_module=module)
+        return
+
+    if action_id == "admin_confirm":
+        code, _, module = actions[0].get("value", "").partition(":")
+        if code:
+            state = get_or_create_state(team_id)
+            state.admin_modules[code] = module
+            state.save()
+        _redraw_admin_card(team_id, response_url)
+        return
+
+    if action_id == "admin_cancel":
+        _redraw_admin_card(team_id, response_url)
+        return
+
+    if action_id == "admin_add":
+        # The confirmed-admin row's own button: "✓ Admin -- click to remove".
+        person_code = actions[0].get("value", "")
+        if person_code:
+            state = get_or_create_state(team_id)
+            state.admin_modules.pop(person_code, None)
+            state.save()
+        _redraw_admin_card(team_id, response_url)
         return
 
     # The nav bar (see nav.py) -- jump straight to any of the 5 main steps,
@@ -149,6 +164,16 @@ def handle_block_action(payload: dict) -> None:
     if nav_key:
         card = with_nav_bar(card, nav_key)
 
+    _replace_message(response_url, card)
+
+
+def _redraw_admin_card(team_id: str, response_url: str, expanded_code: str = "", selected_module: str = "") -> None:
+    workspace = Workspace.objects(team_id=team_id).first()
+    org_name = workspace.team_name if workspace else ""
+    card = build_admin_team_card(
+        team_id, org_name=org_name, expanded_code=expanded_code, selected_module=selected_module
+    )
+    card = with_nav_bar(card, "admin")
     _replace_message(response_url, card)
 
 
