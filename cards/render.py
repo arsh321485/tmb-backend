@@ -309,3 +309,240 @@ def _confirmed_person_blocks(person: dict, module: str) -> list:
             ],
         },
     ]
+
+
+# ---------------------------------------------------------------------------
+# Threat map (Step 3) -- sequential drill-down: category -> cause ->
+# sub-cause -> scenario. Slack can't do a true accordion (several sections
+# expanded independently at once, as the design mockup shows) -- this
+# expands one thing at a time, replacing the card each click, same
+# mechanism as the admin-team card's module picker.
+#
+# Only Business Continuity has real cause/sub-cause data below, matching
+# what the design actually detailed. Other modules show a placeholder
+# with a direct link to Upload BIA -- honest gap, not yet modeled.
+# ---------------------------------------------------------------------------
+
+THREAT_MODULES = ["Cybersecurity", "Privacy", "Business Continuity", "ESG", "Crisis Comms"]
+
+THREATS_BY_MODULE = {
+    "Business Continuity": [
+        {
+            "key": "infra",
+            "label": "Infrastructure loss",
+            "criticality": "Critical",
+            "emoji": ":rotating_light:",
+            "causes": [
+                {
+                    "key": "dc",
+                    "label": "Data-center outage",
+                    "subcauses": [
+                        {"key": "power", "label": "Regional power / network failure"},
+                        {"key": "cooling", "label": "Cooling / hardware failure"},
+                    ],
+                },
+                {
+                    "key": "app",
+                    "label": "Critical system unavailable",
+                    "subcauses": [{"key": "appcrash", "label": "Core application failure"}],
+                },
+            ],
+        },
+        {
+            "key": "supwf",
+            "label": "Supplier & workforce",
+            "criticality": "High",
+            "emoji": ":warning:",
+            "causes": [],
+        },
+    ],
+}
+
+_MOST_CRITICAL = [
+    ("Infrastructure loss", "Business Continuity", "infra"),
+    ("External attacker", "Cybersecurity", None),
+    ("Personal-data breach", "Privacy", None),
+]
+
+
+def _find_category(module: str, category_key: str) -> dict | None:
+    for cat in THREATS_BY_MODULE.get(module, []):
+        if cat["key"] == category_key:
+            return cat
+    return None
+
+
+def _find_cause(module: str, category_key: str, cause_key: str) -> dict | None:
+    category = _find_category(module, category_key)
+    if not category:
+        return None
+    for cause in category["causes"]:
+        if cause["key"] == cause_key:
+            return cause
+    return None
+
+
+def build_threat_map_card(
+    module: str = "Business Continuity", expanded_category: str = "", expanded_cause: str = "",
+) -> dict:
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Step 3 · Threat map", "emoji": True}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": ":dart: *Ranked by criticality*"}]},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Your organization's threats, the incidents that exploit them, and each incident's causes. Pick a cause to see its test scenarios.",
+            },
+        },
+        {"type": "section", "text": {"type": "mrkdwn", "text": "*Most critical now*"}},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": f"{label} · {mod[:3]}", "emoji": True},
+                    "action_id": f"threat_jump__{i}",
+                    "value": f"{mod}:{cat_key or ''}",
+                }
+                for i, (label, mod, cat_key) in enumerate(_MOST_CRITICAL)
+            ],
+        },
+        {"type": "divider"},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": m, "emoji": True},
+                    "action_id": f"threat_module__{m.replace(' ', '_')}",
+                    "value": m,
+                    **({"style": "primary"} if m == module else {}),
+                }
+                for m in THREAT_MODULES
+            ],
+        },
+        {"type": "divider"},
+    ]
+
+    categories = THREATS_BY_MODULE.get(module, [])
+    if not categories:
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"_No detailed threats mapped for {module} yet._",
+                },
+            }
+        )
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Skip to Upload BIA", "emoji": True},
+                        "action_id": "threat_open",
+                        "value": module,
+                        "style": "primary",
+                    }
+                ],
+            }
+        )
+        return {"blocks": blocks}
+
+    for category in categories:
+        if category["key"] == expanded_category:
+            blocks.extend(_expanded_category_blocks(module, category, expanded_cause))
+        else:
+            blocks.extend(_collapsed_category_blocks(module, category))
+        blocks.append({"type": "divider"})
+
+    return {"blocks": blocks}
+
+
+def _collapsed_category_blocks(module: str, category: dict) -> list:
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"{category['emoji']} *{category['label']}*  ·  {category['criticality']}\n{len(category['causes'])} incident(s)",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Open incidents", "emoji": True},
+                    # Unique per category -- more than one collapsed
+                    # category can appear in the same card at once.
+                    "action_id": f"threat_expand_category__{category['key']}",
+                    "value": f"{module}:{category['key']}",
+                }
+            ],
+        },
+    ]
+
+
+def _expanded_category_blocks(module: str, category: dict, expanded_cause: str) -> list:
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"{category['emoji']} *{category['label']}*  ·  {category['criticality']}\n{len(category['causes'])} incident(s)",
+            },
+        }
+    ]
+    for cause in category["causes"]:
+        if cause["key"] == expanded_cause:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*{cause['label']}*\n" + "\n".join(f"• {s['label']}" for s in cause["subcauses"]),
+                    },
+                }
+            )
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": f"Scenarios — {sc['label'][:24]}", "emoji": True},
+                            "action_id": f"threat_scenarios__{sc['key']}",
+                            "value": f"{module}:{category['key']}:{cause['key']}:{sc['key']}",
+                            "style": "primary",
+                        }
+                        for sc in cause["subcauses"]
+                    ],
+                }
+            )
+        else:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*{cause['label']}*\n{len(cause['subcauses'])} cause(s)"},
+                }
+            )
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "View causes", "emoji": True},
+                            # Unique per cause -- more than one un-expanded
+                            # cause can appear under the same category.
+                            "action_id": f"threat_expand_cause__{cause['key']}",
+                            "value": f"{module}:{category['key']}:{cause['key']}",
+                        }
+                    ],
+                }
+            )
+    return blocks

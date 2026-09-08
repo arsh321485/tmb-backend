@@ -28,7 +28,7 @@ from cards.create_team_modal import handle_add_member_click, handle_submission, 
 from cards.loader import load_card
 from cards.models import get_or_create_state
 from cards.nav import card_file_for_nav_key, nav_key_for_card_file, with_nav_bar
-from cards.render import build_admin_team_card, build_response_teams_card
+from cards.render import build_admin_team_card, build_response_teams_card, build_threat_map_card
 from home_tab.models import ProcessedSlackEvent
 from workspaces.models import Workspace, get_bot_token
 
@@ -169,6 +169,58 @@ def handle_block_action(payload: dict) -> None:
         if channel_id and bot_token:
             _post_response_team_summary(team_id, channel_id, bot_token)
 
+    # Threat map: sequential drill-down (category -> cause -> sub-cause ->
+    # scenario), each click redrawing the card one level deeper. Slack
+    # can't do a true accordion (several sections expanded at once, as the
+    # design shows) -- this expands one thing at a time, same mechanism as
+    # the admin-team card. Context (which module/category/cause) is
+    # threaded through each button's value rather than stored, since it's
+    # just navigation state, not something worth persisting.
+    if action_id.startswith("threat_module__"):
+        module = actions[0].get("value", "")
+        card = build_threat_map_card(module=module)
+        card = with_nav_bar(card, "threat")
+        _replace_message(response_url, card)
+        return
+
+    if action_id.startswith("threat_jump__"):
+        module, _, category_key = actions[0].get("value", "").partition(":")
+        card = build_threat_map_card(module=module, expanded_category=category_key)
+        card = with_nav_bar(card, "threat")
+        _replace_message(response_url, card)
+        return
+
+    if action_id.startswith("threat_expand_category__"):
+        module, _, category_key = actions[0].get("value", "").partition(":")
+        card = build_threat_map_card(module=module, expanded_category=category_key)
+        card = with_nav_bar(card, "threat")
+        _replace_message(response_url, card)
+        return
+
+    if action_id.startswith("threat_expand_cause__"):
+        module, category_key, cause_key = actions[0].get("value", "").split(":")
+        card = build_threat_map_card(module=module, expanded_category=category_key, expanded_cause=cause_key)
+        card = with_nav_bar(card, "threat")
+        _replace_message(response_url, card)
+        return
+
+    if action_id.startswith("threat_scenarios__"):
+        # The final pick -- post a permanent record of what was chosen
+        # (same audit-trail pattern as the admin/response-team summaries),
+        # then advance to Upload BIA.
+        channel_id = payload.get("channel", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        value = actions[0].get("value", "")
+        if channel_id and bot_token:
+            _post_threat_scenario_summary(value, channel_id, bot_token)
+
+        workspace = Workspace.objects(team_id=team_id).first()
+        org_name = workspace.team_name if workspace else ""
+        card = load_card("06-bia-needed.json", org_name=org_name)
+        card = with_nav_bar(card, "bia")
+        _replace_message(response_url, card)
+        return
+
     # The nav bar (see nav.py) -- jump straight to any of the 5 main steps,
     # not just move forward one at a time.
     if action_id.startswith("nav_jump__"):
@@ -201,6 +253,8 @@ def handle_block_action(payload: dict) -> None:
         card = build_admin_team_card(team_id, org_name=org_name, person_name=person_name)
     elif next_card_file == "03-response-teams.json":
         card = build_response_teams_card(team_id, org_name=org_name)
+    elif next_card_file == "05-threat-map.json":
+        card = build_threat_map_card()
     else:
         card = load_card(next_card_file, org_name=org_name, person_name=person_name)
 
@@ -269,6 +323,29 @@ def _post_response_team_summary(team_id: str, channel_id: str, bot_token: str) -
         "https://slack.com/api/chat.postMessage",
         headers={"Authorization": f"Bearer {bot_token}"},
         json={"channel": channel_id, "text": f":shield: Response teams confirmed:\n{lines}"},
+        timeout=10,
+    )
+
+
+def _post_threat_scenario_summary(value: str, channel_id: str, bot_token: str) -> None:
+    from cards.render import _find_cause
+
+    try:
+        module, category_key, cause_key, subcause_key = value.split(":")
+    except ValueError:
+        return
+
+    cause = _find_cause(module, category_key, cause_key)
+    if not cause:
+        return
+
+    subcause = next((s for s in cause["subcauses"] if s["key"] == subcause_key), None)
+    focus = f"{cause['label']}" + (f" → {subcause['label']}" if subcause else "")
+
+    requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={"Authorization": f"Bearer {bot_token}"},
+        json={"channel": channel_id, "text": f":dart: Focus set: {focus}"},
         timeout=10,
     )
 
