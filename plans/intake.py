@@ -73,12 +73,25 @@ def handle_dm_message_event(event: dict, team_id: str, bot_token: str) -> None:
     user_id = event.get("user", "")
 
     for f in files:
-        _ingest_one_file(f, channel_id, user_id, team_id, bot_token)
+        ingest_one_file(f, channel_id, user_id, team_id, bot_token)
 
 
-def _ingest_one_file(
-    slack_file: dict, channel_id: str, user_id: str, team_id: str, bot_token: str
-) -> None:
+def ingest_one_file(
+    slack_file: dict,
+    channel_id: str,
+    user_id: str,
+    team_id: str,
+    bot_token: str,
+    post_confirmation: bool = True,
+) -> "Plan | None":
+    """
+    Downloads and parses one Slack file object into a Plan. Public (not
+    just called from the DM-drop path above) so the "Upload BIA" file-
+    picker modal (cards/upload_bia_modal.py) can reuse the exact same real
+    parsing pipeline instead of duplicating it -- `post_confirmation=False`
+    there since that flow shows its own BIA-ready card instead of this
+    generic "Got it, uploaded and parsed" message.
+    """
     filename = slack_file.get("name", "unnamed")
     extension = _extension_of(filename)
 
@@ -89,12 +102,12 @@ def _ingest_one_file(
             "Drop a DOCX, PDF or XLSX file instead.",
             bot_token,
         )
-        return
+        return None
 
     download_url = slack_file.get("url_private_download") or slack_file.get("url_private")
     if not download_url:
         _post_message(channel_id, f":warning: Couldn't read `{filename}` from Slack.", bot_token)
-        return
+        return None
 
     try:
         resp = requests.get(
@@ -106,7 +119,7 @@ def _ingest_one_file(
     except requests.RequestException:
         logger.exception("Failed to download plan file %s from Slack", filename)
         _post_message(channel_id, f":warning: Couldn't download `{filename}` -- try again?", bot_token)
-        return
+        return None
 
     plan = Plan(
         filename=filename,
@@ -136,6 +149,9 @@ def _ingest_one_file(
         plan.parse_error = "Unexpected error while reading the file."
 
     plan.save()
+
+    if not post_confirmation:
+        return plan
 
     version_note = (
         f" This is *version {plan.version}* -- since the plan changed, "
@@ -172,3 +188,5 @@ def _ingest_one_file(
             "still stored.",
             bot_token,
         )
+
+    return plan

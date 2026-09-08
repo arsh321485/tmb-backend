@@ -161,7 +161,10 @@ def slack_callback(request):
         send_welcome(authed_user_id, team.get("name", ""), display_name, bot_token)
 
     _log_user_in(request, user)
-    return _redirect_to_frontend()
+    # TestMyPlan has no real web dashboard -- everything happens in Slack
+    # (Home tab, cards, commands). So instead of stopping on our own "you're
+    # signed in" page, send the browser straight into the workspace's Slack.
+    return HttpResponseRedirect(_slack_app_redirect_url(team_id))
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +278,18 @@ def _log_user_in(request, user: User):
     # swap for a JWT/DRF token scheme later if the frontend needs one.
     request.session["user_id"] = str(user.id)
     request.session["user_email"] = user.email
+
+
+def _slack_app_redirect_url(team_id: str) -> str:
+    """
+    Opens the Slack app itself (desktop client if installed, else
+    slack.com in-browser) for this specific workspace, straight past the
+    Slack post-install screen. Falls back to team.slack.com (still Slack,
+    just not deep-linked to the app) if SLACK_APP_ID isn't configured.
+    """
+    if settings.SLACK_APP_ID:
+        return f"https://slack.com/app_redirect?app={settings.SLACK_APP_ID}&team={team_id}"
+    return "https://slack.com/"
 
 
 def _redirect_to_frontend(error: str | None = None):

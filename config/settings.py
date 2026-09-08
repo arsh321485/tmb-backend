@@ -82,6 +82,11 @@ BACKEND_URL = config("BACKEND_URL", default="http://localhost:8000")
 # --- Slack OAuth ---
 SLACK_CLIENT_ID = config("SLACK_CLIENT_ID", default="")
 SLACK_CLIENT_SECRET = config("SLACK_CLIENT_SECRET", default="")
+# App's own ID (not the client ID) -- from "Basic Information" in the Slack
+# app config. Used to build the app_redirect link that sends the browser
+# straight into the Slack app itself after install, instead of stopping at
+# our own "you're signed in" page.
+SLACK_APP_ID = config("SLACK_APP_ID", default="")
 SLACK_REDIRECT_URI = config(
     "SLACK_REDIRECT_URI", default=f"{BACKEND_URL}/api/auth/slack/callback/"
 )

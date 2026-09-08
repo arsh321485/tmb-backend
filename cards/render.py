@@ -54,6 +54,73 @@ RESPONSE_TEAMS = [
 RESPONSE_TEAM_MEMBER_COUNT = sum(len(t["members"]) for t in RESPONSE_TEAMS)
 
 
+def build_bia_ready_card(plan) -> dict:
+    """
+    Real BIA-ready card built from an actual uploaded/parsed Plan --
+    shared by both upload paths (drag-into-channel and the file-picker
+    modal). Only shows RTO/RPO/contact fields B2's structured_extraction
+    actually found; never fabricates numbers like the design prototype's
+    fixed fake card did.
+    """
+    word_count = len(plan.extracted_text.split()) if plan.extracted_text else 0
+    structured = plan.structured_data or {}
+    rto_values = structured.get("rto") or []
+    rpo_values = structured.get("rpo") or []
+    email_count = len(structured.get("emails") or [])
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Business Continuity · BIA", "emoji": True}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": ":white_check_mark: *Plan ready*"}]},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"BC plan drafted from *{plan.filename}* and ready to test (~{word_count} words parsed).",
+            },
+        },
+    ]
+
+    if rto_values or rpo_values or email_count:
+        blocks.append(
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Target RTO*\n{', '.join(rto_values) or '_not detected_'}"},
+                    {"type": "mrkdwn", "text": f"*Target RPO*\n{', '.join(rpo_values) or '_not detected_'}"},
+                    {"type": "mrkdwn", "text": f"*Contacts found*\n{email_count}"},
+                ],
+            }
+        )
+    else:
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "_No RTO/RPO or contacts detected -- this pattern-matching only catches phrasing like \"RTO: 4 hours\"._",
+                    }
+                ],
+            }
+        )
+
+    blocks.append(
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Show test scenarios", "emoji": True},
+                    "action_id": "bia_scenarios",
+                    "value": "next",
+                    "style": "primary",
+                }
+            ],
+        }
+    )
+    return {"blocks": blocks}
+
+
 def build_response_teams_card(team_id: str, org_name: str = "") -> dict:
     from .models import get_or_create_state
 
@@ -99,37 +166,31 @@ def build_response_teams_card(team_id: str, org_name: str = "") -> dict:
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*{team['team']}*\n{team['module']}"},
+                "text": {"type": "mrkdwn", "text": f"*{team['team']}*\n`{team['module']}`"},
             }
         )
         for member in team["members"]:
             code = member["code"]
             value = f"{team['team']}:{member['role']}:{code}"
             is_added = code in added
+            status = ":large_green_circle:" if is_added else ":bust_in_silhouette:"
             blocks.append(
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"*:bust_in_silhouette: {member['name']}* — {member['role']}",
+                        "text": f"{status} *{member['name']}*\n_{member['role']}_",
                     },
-                }
-            )
-            blocks.append(
-                {
-                    "type": "actions",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {
-                                "type": "plain_text",
-                                "text": "✓ Notified — click to remove" if is_added else f"Add {member['name'].split()[0]}",
-                                "emoji": True,
-                            },
-                            "action_id": "team_add",
-                            "value": value,
-                        }
-                    ],
+                    "accessory": {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Remove" if is_added else f"Add {member['name'].split()[0]}",
+                            "emoji": True,
+                        },
+                        "action_id": "team_add",
+                        "value": value,
+                    },
                 }
             )
         blocks.append({"type": "divider"})
@@ -222,19 +283,17 @@ def _collapsed_person_blocks(person: dict) -> list:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*:bust_in_silhouette: {person['name']}*\n{person['suggested_role']}",
+                "text": f"*:bust_in_silhouette: {person['name']}*\n_{person['suggested_role']}_",
             },
-        },
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": f"Add {person['name'].split()[0]}", "emoji": True},
-                    "action_id": "admin_expand",
-                    "value": person["code"],
-                }
-            ],
+            # A button as an "accessory" sits inline at the end of the row
+            # instead of on its own line below -- reads as one compact row
+            # per person rather than two stacked blocks each.
+            "accessory": {
+                "type": "button",
+                "text": {"type": "plain_text", "text": f"Add {person['name'].split()[0]}", "emoji": True},
+                "action_id": "admin_expand",
+                "value": person["code"],
+            },
         },
     ]
 
@@ -294,19 +353,19 @@ def _confirmed_person_blocks(person: dict, module: str) -> list:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f":white_check_mark: *{person['name']}*\n_{module}_",
+                "text": f":large_green_circle: *{person['name']}*\n`{module}`",
             },
-        },
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "✓ Admin — click to remove", "emoji": True},
-                    "action_id": "admin_add",
-                    "value": code,
-                }
-            ],
+            # Overflow ("...") menu instead of a single Remove button --
+            # lets you change the module assignment without first removing
+            # the person, which the old single-button version couldn't do.
+            "accessory": {
+                "type": "overflow",
+                "action_id": "admin_overflow",
+                "options": [
+                    {"text": {"type": "plain_text", "text": "Change module"}, "value": f"{code}:change"},
+                    {"text": {"type": "plain_text", "text": "Remove"}, "value": f"{code}:remove"},
+                ],
+            },
         },
     ]
 

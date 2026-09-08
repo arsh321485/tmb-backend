@@ -25,6 +25,7 @@ import mongoengine
 
 from accounts.models import User
 from cards.create_team_modal import handle_add_member_click, handle_submission, open_modal
+from cards import upload_bia_modal
 from cards.loader import load_card
 from cards.models import get_or_create_state
 from cards.nav import card_file_for_nav_key, nav_key_for_card_file, with_nav_bar
@@ -137,6 +138,24 @@ def handle_block_action(payload: dict) -> None:
         _redraw_admin_card(team_id, response_url)
         return
 
+    # Confirmed-admin row's "..." overflow menu -- "Change module" re-opens
+    # the same expanded picker (prefilled with their current module) instead
+    # of forcing Remove-then-re-add just to switch someone's module.
+    if action_id == "admin_overflow":
+        value = actions[0].get("selected_option", {}).get("value", "")
+        code, _, act = value.partition(":")
+        if not code:
+            return
+        state = get_or_create_state(team_id)
+        if act == "remove":
+            state.admin_modules.pop(code, None)
+            state.save()
+            _redraw_admin_card(team_id, response_url)
+        elif act == "change":
+            current_module = state.admin_modules.get(code, "All modules")
+            _redraw_admin_card(team_id, response_url, expanded_code=code, selected_module=current_module)
+        return
+
     # Response teams card: "Add Sofia" etc. toggles that person's real
     # notified/added status (same self-correcting pattern as admin_add).
     # Can't send a genuine DM though -- these are the same mock names as
@@ -222,26 +241,18 @@ def handle_block_action(payload: dict) -> None:
         return
 
     # "Upload BIA" -- previously jumped straight to a fake "success" card
-    # with a fictional filename, without needing any real file. Now it
-    # actually waits for a real DOCX/PDF/XLSX dropped in this channel
-    # (see home_tab/views.py's _maybe_complete_bia_upload, which uses the
-    # real plan intake pipeline, B1/B2) before showing anything.
+    # with a fictional filename. Then it posted a "drop your file in this
+    # channel" instruction and waited for a message event. Now it opens a
+    # real Slack modal with a native file picker (file_input) so clicking
+    # the button goes straight to choosing a file, no separate drag/drop
+    # step (see upload_bia_modal.py; parsing still goes through the real
+    # plan intake pipeline, B1/B2).
     if action_id == "bia_upload":
+        trigger_id = payload.get("trigger_id", "")
         channel_id = payload.get("channel", {}).get("id", "")
         bot_token = get_bot_token(team_id)
-        state = get_or_create_state(team_id)
-        state.awaiting_bia = True
-        state.save()
-        if channel_id and bot_token:
-            requests.post(
-                "https://slack.com/api/chat.postMessage",
-                headers={"Authorization": f"Bearer {bot_token}"},
-                json={
-                    "channel": channel_id,
-                    "text": ":paperclip: Drop your Business Impact Analysis (.pdf/.xlsx/.docx) right here in this channel and I'll read it.",
-                },
-                timeout=10,
-            )
+        if trigger_id and bot_token:
+            upload_bia_modal.open_modal(trigger_id, channel_id, bot_token)
         return
 
     # The nav bar (see nav.py) -- jump straight to any of the 5 main steps,
@@ -374,7 +385,8 @@ def _post_threat_scenario_summary(value: str, channel_id: str, bot_token: str) -
 
 
 def handle_view_submission(payload: dict) -> None:
-    """The 'Create team' button inside the modal opened by team_create."""
+    """Routes by callback_id -- more than one modal can submit now (Create
+    team, Upload BIA)."""
     view_id = payload.get("view", {}).get("id", "")
     # Confirmed live: submitting posted the confirmation twice. Same fix
     # as the Events API's retry dedup -- claim this exact view_id once;
@@ -385,7 +397,13 @@ def handle_view_submission(payload: dict) -> None:
 
     team_id = payload.get("team", {}).get("id", "")
     bot_token = get_bot_token(team_id)
-    if bot_token:
+    if not bot_token:
+        return
+
+    callback_id = payload.get("view", {}).get("callback_id", "")
+    if callback_id == upload_bia_modal.CALLBACK_ID:
+        upload_bia_modal.handle_submission(payload, team_id, bot_token)
+    else:
         handle_submission(payload, bot_token)
 
 
