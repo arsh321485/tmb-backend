@@ -48,7 +48,7 @@ _ADVANCE_MAP = {
     "threat_module": None,
     "threat_scenarios": "06-bia-needed.json",
     "threat_open": "06-bia-needed.json",
-    "bia_upload": "07-bia-ready.json",
+    # bia_upload handled specially below -- no longer a fake instant "success".
     "bia_scenarios": "08-scenario.json",
     "scenario_select": None,
     "scenario_plan": "09-test-plan.json",
@@ -219,6 +219,29 @@ def handle_block_action(payload: dict) -> None:
         card = load_card("06-bia-needed.json", org_name=org_name)
         card = with_nav_bar(card, "bia")
         _replace_message(response_url, card)
+        return
+
+    # "Upload BIA" -- previously jumped straight to a fake "success" card
+    # with a fictional filename, without needing any real file. Now it
+    # actually waits for a real DOCX/PDF/XLSX dropped in this channel
+    # (see home_tab/views.py's _maybe_complete_bia_upload, which uses the
+    # real plan intake pipeline, B1/B2) before showing anything.
+    if action_id == "bia_upload":
+        channel_id = payload.get("channel", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        state = get_or_create_state(team_id)
+        state.awaiting_bia = True
+        state.save()
+        if channel_id and bot_token:
+            requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                json={
+                    "channel": channel_id,
+                    "text": ":paperclip: Drop your Business Impact Analysis (.pdf/.xlsx/.docx) right here in this channel and I'll read it.",
+                },
+                timeout=10,
+            )
         return
 
     # The nav bar (see nav.py) -- jump straight to any of the 5 main steps,

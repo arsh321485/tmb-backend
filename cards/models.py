@@ -29,6 +29,10 @@ class WizardState(me.Document):
     # the "added"/"notified" status is tracked for real).
     response_members_added = me.ListField(me.StringField(), default=list)
     custom_teams = me.EmbeddedDocumentListField(CustomTeam, default=list)
+    # True right after "Upload BIA" is clicked, until a real file is
+    # actually dropped in the channel and parsed -- see
+    # home_tab/views.py's _maybe_complete_bia_upload.
+    awaiting_bia = me.BooleanField(default=False)
 
     # strict=False: tolerate old field names left over in already-saved
     # documents from before a schema change (e.g. admins_added ->

@@ -11,6 +11,7 @@ from cards.loader import load_card
 from cards.slack_client import SlackApiError, publish_home_card
 from commands.slack_signature import SlackSignatureError, verify_slack_signature
 from plans.intake import handle_dm_message_event
+from plans.models import Plan
 from workspaces.models import Workspace, get_bot_token
 
 from .models import ProcessedSlackEvent
@@ -60,11 +61,16 @@ def slack_events(request):
 
         elif (
             event.get("type") == "message"
-            and event.get("channel_type") == "im"
+            and event.get("files")
             and "bot_id" not in event
             and event.get("subtype") != "bot_message"
         ):
+            # Was DM-only; broadened to any message with files (also the
+            # command-center channel), since "Upload BIA" needs a real
+            # file dropped there, not just in a DM -- see cards/views.py's
+            # bia_upload handler.
             handle_dm_message_event(event, team_id, bot_token)
+            _maybe_complete_bia_upload(event, team_id, bot_token)
 
     # Slack only cares that we returned 200 quickly; the real work above
     # is fire-and-forget from its point of view.
@@ -82,6 +88,62 @@ def _claim_event(event_id: str) -> bool:
         return True
     except mongoengine.errors.NotUniqueError:
         return False
+
+
+def _maybe_complete_bia_upload(event, team_id, bot_token):
+    """
+    If this workspace clicked "Upload BIA" and is waiting for a real file,
+    and one was just genuinely parsed (plans/intake.py, called just above),
+    post a real BIA-ready card using the actual uploaded file -- not the
+    prototype's fixed fake filename ("Veridian-BIA-2026.xlsx").
+    """
+    from cards.models import get_or_create_state
+    from cards.nav import with_nav_bar
+    from cards.slack_client import post_card_to_channel
+
+    state = get_or_create_state(team_id)
+    if not state.awaiting_bia:
+        return
+
+    channel_id = event.get("channel", "")
+    plan = Plan.objects(slack_team_id=team_id, slack_channel_id=channel_id).order_by("-created_at").first()
+    if plan is None or plan.status != "parsed":
+        return  # unsupported file type, parse failure, etc. -- nothing to confirm yet
+
+    state.awaiting_bia = False
+    state.save()
+
+    word_count = len(plan.extracted_text.split()) if plan.extracted_text else 0
+    card = {
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": "Business Continuity · BIA", "emoji": True}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": ":white_check_mark: *Plan ready*"}]},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"BC plan drafted from *{plan.filename}* and ready to test (~{word_count} words parsed).",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Show test scenarios", "emoji": True},
+                        "action_id": "bia_scenarios",
+                        "value": "next",
+                        "style": "primary",
+                    }
+                ],
+            },
+        ]
+    }
+    card = with_nav_bar(card, "bia")
+    try:
+        post_card_to_channel(channel_id, card, bot_token)
+    except SlackApiError:
+        logger.exception("Failed to post BIA-ready card for team %s", team_id)
 
 
 def _handle_app_home_opened(event, team_id, bot_token):
