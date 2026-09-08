@@ -114,31 +114,65 @@ def _maybe_complete_bia_upload(event, team_id, bot_token):
     state.save()
 
     word_count = len(plan.extracted_text.split()) if plan.extracted_text else 0
-    card = {
-        "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": "Business Continuity · BIA", "emoji": True}},
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": ":white_check_mark: *Plan ready*"}]},
+    structured = plan.structured_data or {}
+    rto_values = structured.get("rto") or []
+    rpo_values = structured.get("rpo") or []
+    email_count = len(structured.get("emails") or [])
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Business Continuity · BIA", "emoji": True}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": ":white_check_mark: *Plan ready*"}]},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"BC plan drafted from *{plan.filename}* and ready to test (~{word_count} words parsed).",
+            },
+        },
+    ]
+
+    # Only show fields we actually found -- no fabricated numbers for
+    # whatever the pattern-matching (structured_extraction.py) didn't
+    # detect in this specific file.
+    if rto_values or rpo_values or email_count:
+        blocks.append(
             {
                 "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"BC plan drafted from *{plan.filename}* and ready to test (~{word_count} words parsed).",
-                },
-            },
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Target RTO*\n{', '.join(rto_values) or '_not detected_'}"},
+                    {"type": "mrkdwn", "text": f"*Target RPO*\n{', '.join(rpo_values) or '_not detected_'}"},
+                    {"type": "mrkdwn", "text": f"*Contacts found*\n{email_count}"},
+                ],
+            }
+        )
+    else:
+        blocks.append(
             {
-                "type": "actions",
+                "type": "context",
                 "elements": [
                     {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Show test scenarios", "emoji": True},
-                        "action_id": "bia_scenarios",
-                        "value": "next",
-                        "style": "primary",
+                        "type": "mrkdwn",
+                        "text": "_No RTO/RPO or contacts detected -- this pattern-matching only catches phrasing like \"RTO: 4 hours\"._",
                     }
                 ],
-            },
-        ]
-    }
+            }
+        )
+
+    blocks.append(
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Show test scenarios", "emoji": True},
+                    "action_id": "bia_scenarios",
+                    "value": "next",
+                    "style": "primary",
+                }
+            ],
+        }
+    )
+    card = {"blocks": blocks}
     card = with_nav_bar(card, "bia")
     try:
         post_card_to_channel(channel_id, card, bot_token)
