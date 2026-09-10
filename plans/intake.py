@@ -142,7 +142,13 @@ def ingest_one_file(
         plan.structured_data = extract_with_ai(plan.extracted_text) or extract_structured_fields(
             plan.extracted_text
         )
-        plan.contact_checks = check_contacts(plan.structured_data.get("emails") or [], bot_token)
+        # AI extraction's "contacts" (name/email/phone dicts) checks by
+        # name when there's no email -- the regex fallback only ever has
+        # "emails" (plain strings), which check_contacts also accepts.
+        contacts_to_check = plan.structured_data.get("contacts")
+        if contacts_to_check is None:
+            contacts_to_check = plan.structured_data.get("emails") or []
+        plan.contact_checks = check_contacts(contacts_to_check, bot_token)
         plan.control_mapping = map_controls(plan.extracted_text)
         plan.gaps = find_gaps(plan.structured_data) + gaps_from_contact_checks(
             plan.contact_checks

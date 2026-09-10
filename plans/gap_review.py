@@ -30,11 +30,21 @@ _GAP_MESSAGES = {
 def find_gaps(structured_data: dict) -> list[dict]:
     """
     Returns a list of {"code": ..., "message": ...} gaps found in a plan's
-    structured_data (see structured_extraction.py). Empty list = no gaps
-    detected by these checks (not a guarantee the plan is actually complete).
+    structured_data (see structured_extraction.py / ai_extraction.py).
+    Empty list = no gaps detected by these checks (not a guarantee the
+    plan is actually complete).
     """
     structured_data = structured_data or {}
     gaps = []
+
+    # AI extraction (plans/ai_extraction.py) sets "systems"/"contacts" --
+    # the old regex extraction never has these keys at all. Distinguish
+    # the two, because what counts as a real gap differs: with AI
+    # extraction, several different RTO values is normal (each system
+    # legitimately has its own target) rather than a genuine conflict,
+    # and "no headed sections" is a regex-only concept that doesn't
+    # apply once the AI has actually understood the document's content.
+    is_ai_extraction = "systems" in structured_data or "contacts" in structured_data
 
     rto = structured_data.get("rto") or []
     rpo = structured_data.get("rpo") or []
@@ -43,18 +53,18 @@ def find_gaps(structured_data: dict) -> list[dict]:
 
     if not rto:
         gaps.append(_gap(GAP_MISSING_RTO))
-    elif len(rto) > 1:
+    elif len(rto) > 1 and not is_ai_extraction:
         gaps.append(_gap(GAP_CONFLICTING_RTO, values=rto))
 
     if not rpo:
         gaps.append(_gap(GAP_MISSING_RPO))
-    elif len(rpo) > 1:
+    elif len(rpo) > 1 and not is_ai_extraction:
         gaps.append(_gap(GAP_CONFLICTING_RPO, values=rpo))
 
     if not contacts:
         gaps.append(_gap(GAP_MISSING_CONTACTS))
 
-    if not sections:
+    if not sections and not is_ai_extraction:
         gaps.append(_gap(GAP_NO_SECTIONS))
 
     return gaps

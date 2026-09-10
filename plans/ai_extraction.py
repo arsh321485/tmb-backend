@@ -18,6 +18,7 @@ call never blocks a plan upload.
 import json
 import logging
 import re
+import time
 
 import requests
 from django.conf import settings
@@ -78,21 +79,8 @@ def extract_with_ai(text: str) -> dict | None:
         return None
 
     prompt = _EXTRACTION_PROMPT.format(text=text[:_MAX_CHARS])
-
-    try:
-        response = requests.post(
-            GEMINI_API_URL,
-            params={"key": api_key},
-            headers={"content-type": "application/json"},
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json"},
-            },
-            timeout=60,
-        )
-        response.raise_for_status()
-    except requests.RequestException:
-        logger.exception("AI plan extraction request failed")
+    response = _call_gemini_with_retries(prompt, api_key)
+    if response is None:
         return None
 
     body = response.json()
@@ -103,6 +91,52 @@ def extract_with_ai(text: str) -> dict | None:
         return None
 
     return _parse_json_response(raw_text)
+
+
+_MAX_ATTEMPTS = 3
+_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}  # rate-limited / server briefly overloaded
+
+
+def _call_gemini_with_retries(prompt: str, api_key: str):
+    """
+    A brief Gemini outage (503 -- confirmed live, happened mid-testing)
+    shouldn't silently degrade every extraction to the much weaker regex
+    fallback. Retries a couple of times with a short pause first, since
+    these are almost always transient.
+    """
+    last_error = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            response = requests.post(
+                GEMINI_API_URL,
+                params={"key": api_key},
+                headers={"content-type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"responseMimeType": "application/json"},
+                },
+                timeout=60,
+            )
+        except requests.RequestException as exc:
+            last_error = exc
+        else:
+            if response.status_code not in _RETRY_STATUS_CODES:
+                try:
+                    response.raise_for_status()
+                except requests.RequestException:
+                    logger.exception("AI plan extraction request failed (non-retryable)")
+                    return None
+                return response
+            last_error = f"HTTP {response.status_code}"
+
+        if attempt < _MAX_ATTEMPTS:
+            logger.warning(
+                "Gemini call failed (attempt %s/%s): %s -- retrying", attempt, _MAX_ATTEMPTS, last_error
+            )
+            time.sleep(attempt)  # 1s, then 2s
+
+    logger.error("AI plan extraction failed after %s attempts: %s", _MAX_ATTEMPTS, last_error)
+    return None
 
 
 def _parse_json_response(raw_text: str) -> dict | None:
