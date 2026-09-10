@@ -23,6 +23,14 @@ PEOPLE = [
 ]
 MODULES = ["All modules", "Cybersecurity", "Privacy", "Business Continuity", "ESG", "Crisis Comms"]
 
+# Kept deliberately uniform -- tried a distinct icon per person (colored
+# circles, face emoji, silhouette variants) and every version rendered
+# inconsistently or looked unprofessional on different platforms. A real
+# per-person avatar needs an uploaded image, which isn't available here;
+# one consistent icon plus the bold name/role text is what actual
+# professional Slack apps do instead of faking distinct avatars with emoji.
+PERSON_COLOR = {"PA": "👤", "MC": "👤", "JW": "👤", "LB": "👤"}
+
 RESPONSE_TEAMS = [
     {
         "team": "Incident Response Team",
@@ -58,15 +66,24 @@ def build_bia_ready_card(plan) -> dict:
     """
     Real BIA-ready card built from an actual uploaded/parsed Plan --
     shared by both upload paths (drag-into-channel and the file-picker
-    modal). Only shows RTO/RPO/contact fields B2's structured_extraction
-    actually found; never fabricates numbers like the design prototype's
-    fixed fake card did.
+    modal). Only shows what was actually extracted (AI extraction when
+    an API key is configured, otherwise the older regex fallback); never
+    fabricates numbers like the design prototype's fixed fake card did.
     """
     word_count = len(plan.extracted_text.split()) if plan.extracted_text else 0
     structured = plan.structured_data or {}
     rto_values = structured.get("rto") or []
     rpo_values = structured.get("rpo") or []
-    email_count = len(structured.get("emails") or [])
+    # AI extraction returns a real "contacts" list (name/role/phone/email --
+    # not every contact has an email, e.g. phone-only entries), so count
+    # that directly instead of just counting emails, which undercounts.
+    # The old regex fallback never sets "contacts", so this falls back to
+    # the email count for that path, same as before.
+    contacts = structured.get("contacts")
+    contact_count = len(contacts) if contacts is not None else len(structured.get("emails") or [])
+    systems = structured.get("systems") or []
+    dependencies = structured.get("dependencies") or []
+    business_functions = structured.get("business_functions") or []
 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": "Business Continuity · BIA", "emoji": True}},
@@ -80,14 +97,36 @@ def build_bia_ready_card(plan) -> dict:
         },
     ]
 
-    if rto_values or rpo_values or email_count:
+    if systems:
+        # AI extraction path -- show RTO/RPO per system, not just a
+        # flattened list with no idea which value belongs to what.
+        system_lines = []
+        for s in systems:
+            rto = s.get("rto") or "_n/a_"
+            rpo = s.get("rpo") or "_n/a_"
+            system_lines.append(f"• *{s.get('name', 'Unknown system')}* — RTO: {rto}, RPO: {rpo}")
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "*Systems & recovery targets*\n" + "\n".join(system_lines)},
+            }
+        )
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": f":bust_in_silhouette: *Contacts found:* {contact_count}"}],
+            }
+        )
+    elif rto_values or rpo_values or contact_count:
+        # Regex fallback path -- no per-system pairing available, just
+        # the flat lists it found.
         blocks.append(
             {
                 "type": "section",
                 "fields": [
                     {"type": "mrkdwn", "text": f"*Target RTO*\n{', '.join(rto_values) or '_not detected_'}"},
                     {"type": "mrkdwn", "text": f"*Target RPO*\n{', '.join(rpo_values) or '_not detected_'}"},
-                    {"type": "mrkdwn", "text": f"*Contacts found*\n{email_count}"},
+                    {"type": "mrkdwn", "text": f"*Contacts found*\n{contact_count}"},
                 ],
             }
         )
@@ -101,6 +140,22 @@ def build_bia_ready_card(plan) -> dict:
                         "text": "_No RTO/RPO or contacts detected -- this pattern-matching only catches phrasing like \"RTO: 4 hours\"._",
                     }
                 ],
+            }
+        )
+
+    # Only present when AI extraction actually ran (structured.get(...)
+    # is empty/missing for the regex fallback, which doesn't know about
+    # these fields at all) -- a real bonus, not a guaranteed section.
+    if business_functions or dependencies:
+        extra_lines = []
+        if business_functions:
+            extra_lines.append(f"*Business functions:* {len(business_functions)} identified")
+        if dependencies:
+            extra_lines.append(f"*Dependencies:* {len(dependencies)} identified")
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "  ·  ".join(extra_lines)}],
             }
         )
 
@@ -128,13 +183,16 @@ def build_response_teams_card(team_id: str, org_name: str = "") -> dict:
     added = set(state.response_members_added)
 
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": "Step 2 · Response teams", "emoji": True}},
+        {"type": "header", "text": {"type": "plain_text", "text": "🛡️ Step 2 · Response teams", "emoji": True}},
         {
             "type": "context",
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": f":shield: *Mandatory teams*  ·  {len(added)} / {RESPONSE_TEAM_MEMBER_COUNT} filled",
+                    "text": (
+                        f":large_green_circle: *{len(added)}/{RESPONSE_TEAM_MEMBER_COUNT} filled*"
+                        f"   |   :shield: Mandatory teams"
+                    ),
                 }
             ],
         },
@@ -143,7 +201,7 @@ def build_response_teams_card(team_id: str, org_name: str = "") -> dict:
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f"Add each member -- {org_name or 'your org'} teams are tracked here. "
+                    f">Add each member -- {org_name or 'your org'} teams are tracked here. "
                     "You can also build your own teams for anything else."
                 ),
             },
@@ -173,7 +231,7 @@ def build_response_teams_card(team_id: str, org_name: str = "") -> dict:
             code = member["code"]
             value = f"{team['team']}:{member['role']}:{code}"
             is_added = code in added
-            status = ":large_green_circle:" if is_added else ":bust_in_silhouette:"
+            status = ":bust_in_silhouette: :white_check_mark:" if is_added else ":bust_in_silhouette:"
             blocks.append(
                 {
                     "type": "section",
@@ -195,22 +253,29 @@ def build_response_teams_card(team_id: str, org_name: str = "") -> dict:
             )
         blocks.append({"type": "divider"})
 
+    team_count = len(state.custom_teams)
+    create_team_label = (
+        f"✅ {team_count} custom team{'s' if team_count != 1 else ''} created — Create another"
+        if team_count
+        else "Create a team"
+    )
+
     blocks.append(
         {
             "type": "actions",
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Create a team", "emoji": True},
+                    "text": {"type": "plain_text", "text": create_team_label, "emoji": True},
                     "action_id": "team_create",
                     "value": "open",
                 },
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Teams ready — show my threat map", "emoji": True},
+                    "text": {"type": "plain_text", "text": "➡️ Teams ready — show my threat map", "emoji": True},
                     "action_id": "teams_done",
                     "value": "next",
-                    "style": "primary",
+                    "style": "danger",
                 },
             ],
         }
@@ -229,13 +294,16 @@ def build_admin_team_card(
     admin_modules = state.admin_modules or {}
 
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": "Step 1 · Admin team", "emoji": True}},
+        {"type": "header", "text": {"type": "plain_text", "text": "👥 Step 1 · Admin team", "emoji": True}},
         {
             "type": "context",
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": f":busts_in_silhouette: *Share the load*  ·  {len(admin_modules)} added",
+                    "text": (
+                        f":large_green_circle: *{len(admin_modules)}/{len(PEOPLE)} confirmed*"
+                        f"   |   :dart: Share the load by module"
+                    ),
                 }
             ],
         },
@@ -243,7 +311,7 @@ def build_admin_team_card(
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "Each admin can run every module, or only the ones under their responsibility.",
+                "text": ">Each admin can run every module, or only the ones under their responsibility.",
             },
         },
         {"type": "divider"},
@@ -265,10 +333,10 @@ def build_admin_team_card(
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Continue — set up response teams", "emoji": True},
+                    "text": {"type": "plain_text", "text": "➡️ Continue — set up response teams", "emoji": True},
                     "action_id": "admin_done",
                     "value": "next",
-                    "style": "primary",
+                    "style": "danger",
                 }
             ],
         }
@@ -278,12 +346,13 @@ def build_admin_team_card(
 
 
 def _collapsed_person_blocks(person: dict) -> list:
+    color = PERSON_COLOR.get(person["code"], "⚪")
     return [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*:bust_in_silhouette: {person['name']}*\n_{person['suggested_role']}_",
+                "text": f"{color} *{person['name']}*\n_{person['suggested_role']}_",
             },
             # A button as an "accessory" sits inline at the end of the row
             # instead of on its own line below -- reads as one compact row
@@ -300,15 +369,16 @@ def _collapsed_person_blocks(person: dict) -> list:
 
 def _expanded_person_blocks(person: dict, selected_module: str) -> list:
     code = person["code"]
+    color = PERSON_COLOR.get(code, "⚪")
     return [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*:bust_in_silhouette: {person['name']}*\n{person['suggested_role']}",
+                "text": f"{color} *{person['name']}*\n{person['suggested_role']}",
             },
         },
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": "*Module responsibility*"}]},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": ":gear: *Module responsibility*"}]},
         {
             "type": "actions",
             "elements": [
@@ -320,7 +390,7 @@ def _expanded_person_blocks(person: dict, selected_module: str) -> list:
                     # applied elsewhere for the same underlying mistake).
                     "action_id": f"admin_pick_module__{module.replace(' ', '_')}",
                     "value": f"{code}:{module}",
-                    **({"style": "primary"} if module == selected_module else {}),
+                    **({"style": "danger"} if module == selected_module else {}),
                 }
                 for module in MODULES
             ],
@@ -333,7 +403,7 @@ def _expanded_person_blocks(person: dict, selected_module: str) -> list:
                     "text": {"type": "plain_text", "text": f"+ Add as admin ({selected_module})", "emoji": True},
                     "action_id": "admin_confirm",
                     "value": f"{code}:{selected_module}",
-                    "style": "primary",
+                    "style": "danger",
                 },
                 {
                     "type": "button",
@@ -348,12 +418,13 @@ def _expanded_person_blocks(person: dict, selected_module: str) -> list:
 
 def _confirmed_person_blocks(person: dict, module: str) -> list:
     code = person["code"]
+    color = PERSON_COLOR.get(code, "⚪")
     return [
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f":large_green_circle: *{person['name']}*\n`{module}`",
+                "text": f"{color} *{person['name']}* :white_check_mark:\n`{module}`",
             },
             # Overflow ("...") menu instead of a single Remove button --
             # lets you change the module assignment without first removing
@@ -417,6 +488,10 @@ THREATS_BY_MODULE = {
     ],
 }
 
+# Slack can't color text, so a colored dot next to the word is the real
+# equivalent of the mockup's red/orange "CRITICAL"/"HIGH" pill.
+CRITICALITY_COLOR = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢"}
+
 _MOST_CRITICAL = [
     ("Infrastructure loss", "Business Continuity", "infra"),
     ("External attacker", "Cybersecurity", None),
@@ -454,13 +529,13 @@ def build_threat_map_card(
                 "text": "Your organization's threats, the incidents that exploit them, and each incident's causes. Pick a cause to see its test scenarios.",
             },
         },
-        {"type": "section", "text": {"type": "mrkdwn", "text": "*Most critical now*"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": "🔴 *Most critical now*"}},
         {
             "type": "actions",
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": f"{label} · {mod[:3]}", "emoji": True},
+                    "text": {"type": "plain_text", "text": f"{label} · {mod}", "emoji": True},
                     "action_id": f"threat_jump__{i}",
                     "value": f"{mod}:{cat_key or ''}",
                 }
@@ -476,7 +551,7 @@ def build_threat_map_card(
                     "text": {"type": "plain_text", "text": m, "emoji": True},
                     "action_id": f"threat_module__{m.replace(' ', '_')}",
                     "value": m,
-                    **({"style": "primary"} if m == module else {}),
+                    **({"style": "danger"} if m == module else {}),
                 }
                 for m in THREAT_MODULES
             ],
@@ -527,7 +602,11 @@ def _collapsed_category_blocks(module: str, category: dict) -> list:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"{category['emoji']} *{category['label']}*  ·  {category['criticality']}\n{len(category['causes'])} incident(s)",
+                "text": (
+                    f"› {category['emoji']} *{category['label']}*  ·  "
+                    f"{CRITICALITY_COLOR.get(category['criticality'], '')} *{category['criticality']}*"
+                    f"\n{len(category['causes'])} incident(s)"
+                ),
             },
         },
         {
@@ -552,7 +631,11 @@ def _expanded_category_blocks(module: str, category: dict, expanded_cause: str) 
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"{category['emoji']} *{category['label']}*  ·  {category['criticality']}\n{len(category['causes'])} incident(s)",
+                "text": (
+                    f"⌄ {category['emoji']} *{category['label']}*  ·  "
+                    f"{CRITICALITY_COLOR.get(category['criticality'], '')} *{category['criticality']}*"
+                    f"\n{len(category['causes'])} incident(s)"
+                ),
             },
         }
     ]
@@ -563,7 +646,7 @@ def _expanded_category_blocks(module: str, category: dict, expanded_cause: str) 
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"*{cause['label']}*\n" + "\n".join(f"• {s['label']}" for s in cause["subcauses"]),
+                        "text": f"⌄ *{cause['label']}*\n" + "\n".join(f"• {s['label']}" for s in cause["subcauses"]),
                     },
                 }
             )
@@ -573,10 +656,10 @@ def _expanded_category_blocks(module: str, category: dict, expanded_cause: str) 
                     "elements": [
                         {
                             "type": "button",
-                            "text": {"type": "plain_text", "text": f"Scenarios — {sc['label'][:24]}", "emoji": True},
+                            "text": {"type": "plain_text", "text": f"Scenarios — {sc['label'][:24]} →", "emoji": True},
                             "action_id": f"threat_scenarios__{sc['key']}",
                             "value": f"{module}:{category['key']}:{cause['key']}:{sc['key']}",
-                            "style": "primary",
+                            "style": "danger",
                         }
                         for sc in cause["subcauses"]
                     ],
@@ -586,7 +669,7 @@ def _expanded_category_blocks(module: str, category: dict, expanded_cause: str) 
             blocks.append(
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"*{cause['label']}*\n{len(cause['subcauses'])} cause(s)"},
+                    "text": {"type": "mrkdwn", "text": f"› *{cause['label']}*\n{len(cause['subcauses'])} cause(s)"},
                 }
             )
             blocks.append(

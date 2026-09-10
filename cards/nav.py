@@ -13,16 +13,16 @@ Preparedness report card with no way back to Welcome).
 
 # (label, key, card filename) -- order is display order in the nav bar.
 NAV_STEPS = [
-    ("Welcome", "welcome", "01-welcome.json"),
-    ("Add admin", "admin", "02-admin-team.json"),
-    ("Teams", "teams", "03-response-teams.json"),
-    ("Threat map", "threat", "05-threat-map.json"),
-    ("BIA / Scenario", "bia", "06-bia-needed.json"),
-    ("Scenario", "scenario", "08-scenario.json"),
-    ("Test plan", "plan", "09-test-plan.json"),
-    ("Trigger", "trigger", "10-trigger.json"),
-    ("Live", "live", "11-test-live.json"),
-    ("Report", "report", "23-preparedness-report.json"),
+    ("👋 Welcome", "welcome", "01-welcome.json"),
+    ("👥 Add admin", "admin", "02-admin-team.json"),
+    ("🛡️ Teams", "teams", "03-response-teams.json"),
+    ("🗺️ Threat map", "threat", "05-threat-map.json"),
+    ("📄 BIA / Scenario", "bia", "06-bia-needed.json"),
+    ("🎯 Scenario", "scenario", "08-scenario.json"),
+    ("📋 Test plan", "plan", "09-test-plan.json"),
+    ("🚨 Trigger", "trigger", "10-trigger.json"),
+    ("🔴 Live", "live", "11-test-live.json"),
+    ("📊 Report", "report", "23-preparedness-report.json"),
 ]
 
 # Card files that are "the same step" as one of the ones above for nav

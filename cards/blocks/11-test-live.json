@@ -57,15 +57,34 @@
           "value": "report"
         },
         {
-          "type": "button",
-          "text": {
+          "type": "static_select",
+          "action_id": "live_inject_select",
+          "placeholder": {
             "type": "plain_text",
-            "text": "Inject a scenario",
-            "emoji": true
+            "text": "Inject a scenario"
           },
-          "action_id": "live_inject",
-          "value": "inject",
-          "style": "danger"
+          "options": [
+            {
+              "text": { "type": "plain_text", "text": "Regional power / network failure" },
+              "value": "power_network_failure"
+            },
+            {
+              "text": { "type": "plain_text", "text": "Cooling / hardware failure" },
+              "value": "cooling_hardware_failure"
+            },
+            {
+              "text": { "type": "plain_text", "text": "Core application failure" },
+              "value": "core_app_failure"
+            },
+            {
+              "text": { "type": "plain_text", "text": "Key contact unreachable" },
+              "value": "contact_unreachable"
+            },
+            {
+              "text": { "type": "plain_text", "text": "Supplier / vendor outage" },
+              "value": "supplier_outage"
+            }
+          ]
         },
         {
           "type": "button",

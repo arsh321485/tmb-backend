@@ -14,10 +14,13 @@ state across view.update calls on its own.
 """
 
 import json
+import logging
 
 import requests
 
 from .models import CustomTeam, get_or_create_state
+
+logger = logging.getLogger(__name__)
 
 SLACK_API_BASE = "https://slack.com/api"
 CALLBACK_ID = "create_team_modal"
@@ -53,7 +56,6 @@ def build_modal_view(channel_id: str, assignments: list) -> dict:
             "type": "input",
             "block_id": "module",
             "label": {"type": "plain_text", "text": "Module"},
-            "optional": True,
             "element": {
                 "type": "static_select",
                 "action_id": "value",
@@ -83,7 +85,6 @@ def build_modal_view(channel_id: str, assignments: list) -> dict:
                 "type": "input",
                 "block_id": "new_role",
                 "label": {"type": "plain_text", "text": "Role"},
-                "optional": True,
                 "element": {
                     "type": "static_select",
                     "action_id": "value",
@@ -97,7 +98,6 @@ def build_modal_view(channel_id: str, assignments: list) -> dict:
                 "type": "input",
                 "block_id": "new_member",
                 "label": {"type": "plain_text", "text": "Assign to"},
-                "optional": True,
                 "element": {"type": "users_select", "action_id": "value"},
             },
             {
@@ -155,12 +155,18 @@ def handle_add_member_click(payload: dict, bot_token: str) -> None:
     if module_option:
         new_view["blocks"][1]["element"]["initial_option"] = module_option
 
-    requests.post(
+    resp = requests.post(
         f"{SLACK_API_BASE}/views.update",
         headers={"Authorization": f"Bearer {bot_token}"},
         json={"view_id": view.get("id"), "hash": view.get("hash"), "view": new_view},
         timeout=10,
-    )
+    ).json()
+    if not resp.get("ok"):
+        # requests doesn't raise on a Slack-level rejection (HTTP 200 with
+        # ok:false, e.g. a validation error or a stale hash) -- without
+        # this it fails completely silently and just shows as "trouble
+        # connecting" in the modal with nothing in our own logs.
+        logger.warning("views.update failed for create_team_modal: %s", resp)
 
 
 def handle_submission(payload: dict, bot_token: str) -> None:

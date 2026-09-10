@@ -8,6 +8,7 @@ import logging
 
 import requests
 
+from .ai_extraction import extract_with_ai
 from .contact_freshness import check_contacts, gaps_from_contact_checks
 from .control_mapping import map_controls
 from .models import ALLOWED_EXTENSIONS, STATUS_FAILED, STATUS_PARSED, Plan
@@ -133,7 +134,14 @@ def ingest_one_file(
 
     try:
         plan.extracted_text = extract_text(resp.content, extension)
-        plan.structured_data = extract_structured_fields(plan.extracted_text)
+        # Try real AI extraction first (reads whatever fields the document
+        # actually has -- RTO/RPO, contacts, systems, dependencies, impact
+        # ratings, resource ramp-up -- regardless of template/format).
+        # Falls back to the old fixed regex patterns if no API key is set
+        # or the AI call fails, so a plan upload never breaks either way.
+        plan.structured_data = extract_with_ai(plan.extracted_text) or extract_structured_fields(
+            plan.extracted_text
+        )
         plan.contact_checks = check_contacts(plan.structured_data.get("emails") or [], bot_token)
         plan.control_mapping = map_controls(plan.extracted_text)
         plan.gaps = find_gaps(plan.structured_data) + gaps_from_contact_checks(

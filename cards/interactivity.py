@@ -255,6 +255,25 @@ def handle_block_action(payload: dict) -> None:
             upload_bia_modal.open_modal(trigger_id, channel_id, bot_token)
         return
 
+    # "Inject a scenario" -- was a single button that did nothing real.
+    # Now a real dropdown (static_select) of specific scenarios; picking
+    # one posts a real confirmation to the channel. Slack keeps the
+    # dropdown showing the picked option on its own, so no card redraw
+    # is needed here.
+    if action_id == "live_inject_select":
+        option = actions[0].get("selected_option", {})
+        label = option.get("text", {}).get("text", "")
+        channel_id = payload.get("channel", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        if label and channel_id and bot_token:
+            requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                json={"channel": channel_id, "text": f":zap: Injected: *{label}*"},
+                timeout=10,
+            )
+        return
+
     # The nav bar (see nav.py) -- jump straight to any of the 5 main steps,
     # not just move forward one at a time.
     if action_id.startswith("nav_jump__"):

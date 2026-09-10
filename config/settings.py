@@ -124,6 +124,16 @@ TEAMS_SCOPES = config("TEAMS_SCOPES", default="openid email profile User.Read")
 MONGO_HOST = config("MONGO_HOST", default="mongodb://localhost:27017")
 MONGO_DB_NAME = config("MONGO_DB_NAME", default="tmb_backend")
 
+# --- AI plan extraction (B2) ---
+# Used to read an uploaded plan (any format/template) and pull out RTO/RPO,
+# contacts, systems, dependencies, impact ratings, etc. -- instead of the
+# old fixed regex patterns, which only caught a few exact phrasings and
+# couldn't see anything beyond RTO/RPO/emails/phones. Left blank, plan
+# intake falls back to that old regex extraction automatically -- nothing
+# breaks if this isn't set yet. Gemini (not Anthropic) specifically
+# because it has a genuinely free tier, unlike the Anthropic/OpenAI APIs.
+GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

@@ -6,7 +6,7 @@
       "type": "header",
       "text": {
         "type": "plain_text",
-        "text": "Welcome, Alex. Your command center is live.",
+        "text": ":dart: Welcome, Alex!",
         "emoji": true
       }
     },
@@ -15,7 +15,7 @@
       "elements": [
         {
           "type": "mrkdwn",
-          "text": ":dart: *Getting started*  ·  :white_check_mark: Connected"
+          "text": ":large_green_circle: *Connected*   |   :office: *Veridian Health*   |   :calendar: Command center live"
         }
       ]
     },
@@ -23,7 +23,7 @@
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "This channel is where *Veridian Health* plans, runs, and reviews every readiness test."
+        "text": ">:sparkles: This channel is where *Veridian Health* plans, runs, and reviews every readiness test — no separate dashboard, everything happens right here."
       }
     },
     {
@@ -33,8 +33,39 @@
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "*How it works*\n*1.* Build your admin team — share the load by module\n*2.* Stand up the mandatory response teams\n*3.* Review your threat map and pick a scenario\n*4.* Trigger the test — everyone takes part right here"
+        "text": "*How it works*"
       }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":one: Admin team — Share the load by module"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":two: Response teams — Stand up the mandatory teams"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":three: Threat map — Review risks, pick a scenario"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":four: Trigger — Everyone takes part, right here"
+      }
+    },
+    {
+      "type": "divider"
     },
     {
       "type": "actions",
@@ -43,12 +74,12 @@
           "type": "button",
           "text": {
             "type": "plain_text",
-            "text": "Build my admin team",
+            "text": "🚀 Build my admin team",
             "emoji": true
           },
           "action_id": "welcome_build_admin",
           "value": "next",
-          "style": "primary"
+          "style": "danger"
         }
       ]
     },
@@ -57,7 +88,7 @@
       "elements": [
         {
           "type": "mrkdwn",
-          "text": "Every step is a button — no commands to memorize."
+          "text": ":bulb: Every step is a button — no commands to memorize."
         }
       ]
     }
