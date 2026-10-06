@@ -87,11 +87,11 @@ def ingest_one_file(
 ) -> "Plan | None":
     """
     Downloads and parses one Slack file object into a Plan. Public (not
-    just called from the DM-drop path above) so the "Upload BIA" file-
-    picker modal (cards/upload_bia_modal.py) can reuse the exact same real
-    parsing pipeline instead of duplicating it -- `post_confirmation=False`
-    there since that flow shows its own BIA-ready card instead of this
-    generic "Got it, uploaded and parsed" message.
+    just called from the DM-drop path above) so any other real upload
+    entry point (a future file-picker modal, etc.) can reuse the exact
+    same real parsing pipeline instead of duplicating it --
+    `post_confirmation=False` for a caller that shows its own result
+    card instead of this generic "Got it, uploaded and parsed" message.
     """
     filename = slack_file.get("name", "unnamed")
     extension = _extension_of(filename)

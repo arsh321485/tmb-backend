@@ -9,6 +9,7 @@ from django.views.decorators.http import require_POST
 from commands.slack_signature import SlackSignatureError, verify_slack_signature
 
 from .interactivity import handle_block_action, handle_view_submission
+from .interactivity_v2 import handle_block_action_v2
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,9 @@ def slack_interactivity(request):
 
     payload_type = payload.get("type")
     if payload_type == "block_actions":
-        _run_in_background(handle_block_action, payload)
+        actions = payload.get("actions") or []
+        is_v2 = actions and actions[0].get("action_id", "").startswith("v2_")
+        _run_in_background(handle_block_action_v2 if is_v2 else handle_block_action, payload)
     elif payload_type == "view_submission":
         _run_in_background(handle_view_submission, payload)
 

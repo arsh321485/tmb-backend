@@ -18,7 +18,18 @@ from exercises.models import (
     STATUS_RUNNING,
     Exercise,
 )
-from exercises.slack_channels import SlackApiError, archive_exercise_channel, provision_exercise_channel
+import re
+
+from exercises.slack_channels import (
+    SlackApiError,
+    archive_exercise_channel,
+    invite_participants,
+    provision_exercise_channel,
+)
+
+# Slack renders an @-mention in slash command text as "<@U0123|handle>" or
+# just "<@U0123>" -- pull the user ID out of either form.
+_MENTION_PATTERN = re.compile(r"<@([A-Z0-9]+)(?:\|[^>]*)?>")
 from plans.models import Plan
 from plans.scenario_mapping import map_plan_coverage
 from workspaces.models import get_bot_token
@@ -46,13 +57,24 @@ def handle_run(args, user_id, channel_id, team_id):
             "to check it or `/testmyplan abort` to end it first."
         )
 
-    scenario = args or "Unnamed scenario"
+    # A7: any @-mentions in the command are external participants for
+    # THIS exercise specifically -- e.g. "/testmyplan run ransomware
+    # @vendor.contact @ciso" -- not people permanently on the admin or
+    # response teams. Stripped out of the text so they don't end up as
+    # part of the scenario name.
+    external_participant_ids = _MENTION_PATTERN.findall(args)
+    scenario = _MENTION_PATTERN.sub("", args).strip() or "Unnamed scenario"
+
     exercise = Exercise(
-        scenario_name=scenario, started_by_slack_user_id=user_id, slack_team_id=team_id
+        scenario_name=scenario,
+        started_by_slack_user_id=user_id,
+        slack_team_id=team_id,
+        external_participant_ids=external_participant_ids,
     )
 
+    bot_token = get_bot_token(team_id)
     try:
-        channel = provision_exercise_channel(scenario, user_id, get_bot_token(team_id))
+        channel = provision_exercise_channel(scenario, user_id, bot_token)
     except SlackApiError as exc:
         return _ephemeral(
             f":warning: Couldn't create the exercise channel ({exc}). "
@@ -63,8 +85,16 @@ def handle_run(args, user_id, channel_id, team_id):
     exercise.slack_channel_name = channel["name"]
     exercise.save()
 
+    note = ""
+    if external_participant_ids:
+        failed = invite_participants(channel["id"], external_participant_ids, bot_token)
+        invited_count = len(external_participant_ids) - len(failed)
+        note = f" {invited_count} external participant(s) invited."
+        if failed:
+            note += f" Couldn't invite: {', '.join(f'<@{u}>' for u in failed)}."
+
     return _ephemeral(
-        f":rocket: Started exercise *{scenario}* in <#{channel['id']}|{channel['name']}>."
+        f":rocket: Started exercise *{scenario}* in <#{channel['id']}|{channel['name']}>.{note}"
     )
 
 
@@ -78,8 +108,12 @@ def handle_status(args, user_id, channel_id, team_id):
         if exercise.slack_channel_id
         else "(no channel)"
     )
+    participants_note = ""
+    if exercise.external_participant_ids:
+        mentions = ", ".join(f"<@{u}>" for u in exercise.external_participant_ids)
+        participants_note = f"\n*External participants:* {mentions}"
     return _ephemeral(
-        f"*{exercise.scenario_name}* -- status: `{exercise.status}` -- {channel_ref}"
+        f"*{exercise.scenario_name}* -- status: `{exercise.status}` -- {channel_ref}{participants_note}"
     )
 
 

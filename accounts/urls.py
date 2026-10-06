@@ -8,4 +8,5 @@ urlpatterns = [
     path("teams/", views.teams_login, name="teams_login"),
     path("teams/callback/", views.teams_callback, name="teams_callback"),
     path("me/", views.me, name="me"),
+    path("org-profile/pending/", views.save_pending_org_profile, name="save_pending_org_profile"),
 ]

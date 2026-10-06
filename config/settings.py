@@ -66,7 +66,7 @@ MIDDLEWARE = [
 # Frontend origin(s) allowed to call this API (Vite dev server, prod domain, etc.)
 CORS_ALLOWED_ORIGINS = config(
     "CORS_ALLOWED_ORIGINS",
-    default="http://localhost:5173,http://127.0.0.1:5173",
+    default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174",
     cast=Csv(),
 )
 CORS_ALLOW_CREDENTIALS = True
@@ -98,7 +98,7 @@ SLACK_SCOPES = config("SLACK_SCOPES", default="openid,email,profile")
 # in the Slack app dashboard, or the install will be rejected.
 SLACK_BOT_SCOPES = config(
     "SLACK_BOT_SCOPES",
-    default="channels:history,channels:manage,chat:write,commands,files:read,im:history,users:read,users:read.email,channels:read",
+    default="channels:history,channels:manage,chat:write,commands,files:read,im:history,users:read,users:read.email,channels:read,groups:write,groups:read,groups:history,im:write",
 )
 # Used to verify that a slash-command request really came from Slack.
 # Find it in api.slack.com/apps -> your app -> Basic Information -> Signing Secret.

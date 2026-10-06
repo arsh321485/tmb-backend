@@ -4,15 +4,57 @@ from urllib.parse import urlencode
 import requests
 from django.conf import settings
 from django.http import HttpResponseRedirect
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from cards.onboarding import send_welcome
+from cards.onboarding_v2 import send_new_design_preview
+from cards.user_channels_v2 import ensure_user_channels
+from cards.user_flow_test import post_welcome as post_user_test_welcome
+from cards.user_flow_test import post_general_announcement
 
 from .models import SlackAccount, TeamsAccount, User
-from workspaces.models import Workspace
+from workspaces.models import Workspace, claim_onboarding
+
+
+def _is_valid_website_url(value: str) -> bool:
+    """Any real http(s) address, dot in the domain or not -- just needs to actually be a URL, not a bare word."""
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+@api_view(["POST"])
+def save_pending_org_profile(request):
+    """
+    Website signup form (Organization Details step, BEFORE "Sign up with
+    Slack") posts here. Returns a token; the frontend carries it through
+    the Slack OAuth redirect (?profile_token=...) so slack_callback can
+    find it again once we know which real Slack workspace this becomes.
+    """
+    import secrets as _secrets
+
+    from cards.models_v2 import PendingOrgProfile
+
+    data = request.data
+    website_url = (data.get("website_url") or "").strip()
+    if website_url and not _is_valid_website_url(website_url):
+        return Response({"error": "invalid_website_url"}, status=400)
+
+    token = _secrets.token_urlsafe(24)
+    PendingOrgProfile(
+        token=token,
+        org_name=(data.get("org_name") or "").strip(),
+        industry=(data.get("industry") or "").strip(),
+        website_url=website_url,
+        regions=list(data.get("regions") or []),
+        regulations=list(data.get("regulations") or []),
+    ).save()
+    return Response({"token": token})
 
 
 def _get_or_create_user(email, name=""):
@@ -70,6 +112,12 @@ def slack_login(request):
     """
     state = secrets.token_urlsafe(24)
     request.session["slack_oauth_state"] = state
+
+    # Carries the Organization Details filled in on the website signup
+    # form through to slack_callback, once we know the real team_id.
+    profile_token = request.GET.get("profile_token")
+    if profile_token:
+        request.session["pending_profile_token"] = profile_token
 
     params = {
         "client_id": settings.SLACK_CLIENT_ID,
@@ -157,14 +205,85 @@ def slack_callback(request):
     )
     user.save()
 
-    if is_new_workspace:
-        send_welcome(authed_user_id, team.get("name", ""), display_name, bot_token)
-
     _log_user_in(request, user)
-    # TestMyPlan has no real web dashboard -- everything happens in Slack
-    # (Home tab, cards, commands). So instead of stopping on our own "you're
-    # signed in" page, send the browser straight into the workspace's Slack.
+
+    if is_new_workspace:
+        _attach_pending_org_profile(request, team_id)
+        _finish_new_workspace_onboarding(team_id, authed_user_id, bot_token)
+
+    # Existing workspace: nothing new to set up, straight into Slack.
     return HttpResponseRedirect(_slack_app_redirect_url(team_id))
+
+
+def _attach_pending_org_profile(request, team_id: str) -> None:
+    """
+    If Organization Details was filled in on the website signup form
+    before this Slack install, copy it into the real OrgProfile for this
+    brand-new workspace and discard the pending copy. No-op if the
+    installer skipped that form or came in through an existing workspace.
+    """
+    token = request.session.pop("pending_profile_token", None)
+    if not token:
+        return
+
+    from cards.models_v2 import OrgProfile, PendingOrgProfile
+
+    pending = PendingOrgProfile.objects(token=token).first()
+    if pending is None:
+        return
+
+    profile = OrgProfile.objects(team_id=team_id).first() or OrgProfile(team_id=team_id)
+    profile.org_name = pending.org_name
+    profile.industry = pending.industry
+    profile.website_url = pending.website_url
+    profile.regions = list(pending.regions)
+    profile.regulations = list(pending.regulations)
+    profile.save()
+
+    pending.delete()
+
+
+def _finish_new_workspace_onboarding(team_id: str, authed_user_id: str, bot_token: str) -> None:
+    """
+    Creates the admin channel + the 3 participant channels, invites the
+    installer into all of them, and posts the first cards.
+
+    Guarded by claim_onboarding() so this can never run twice for the
+    same workspace (confirmed live: a slow request plus a retry caused
+    2-3 duplicate Welcome cards before this guard existed).
+    """
+    if not claim_onboarding(team_id):
+        return
+    send_new_design_preview(team_id, authed_user_id, bot_token)
+    # NOTE: the cards posted below are still the hardcoded
+    # "Sofia/ransomware" design-review content (cards/user_flow_test.py),
+    # not a real personalized exercise -- sir asked to see the mockup
+    # live in every new workspace for now, to be replaced with real
+    # per-workspace data once the design is approved. #privacy-bridge
+    # is deliberately left empty; it only opens once the participant
+    # acknowledges Inject 3 in #ir-war-room.
+    user_channels = ensure_user_channels(team_id, bot_token)
+    war_room_id = user_channels.get("ir_war_room_channel_id")
+    privacy_id = user_channels.get("privacy_bridge_channel_id")
+    general_id = user_channels.get("general_channel_id")
+    # Invite the installer into all 3 -- same as the admin channel
+    # already does. Without this, they're created but invisible to
+    # everyone (confirmed live: this exact gap on the first test).
+    for channel_id in (war_room_id, privacy_id, general_id):
+        if channel_id and authed_user_id:
+            try:
+                requests.post(
+                    f"{SLACK_TOKEN_URL.rsplit('/', 1)[0]}/conversations.invite",
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                    data={"channel": channel_id, "users": authed_user_id},
+                    timeout=10,
+                )
+            except requests.RequestException:
+                pass
+    if war_room_id:
+        post_user_test_welcome(war_room_id, bot_token)
+    if general_id:
+        post_general_announcement(general_id, bot_token)
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,63 @@
+{
+  "channel": "#testmyplan-new-design-preview",
+  "text": "Welcome, {{USER_NAME}}. Your command center is live.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": { "type": "plain_text", "text": ":wave: Welcome, {{USER_NAME}}!", "emoji": true }
+    },
+    {
+      "type": "context",
+      "elements": [
+        { "type": "mrkdwn", "text": ":large_green_circle: *Connected*  ·  Getting started" }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "This channel is where *{{TEAM_NAME}}* plans, runs, and reviews every readiness test."
+      }
+    },
+    { "type": "divider" },
+    {
+      "type": "section",
+      "text": { "type": "mrkdwn", "text": "*How it works*" }
+    },
+    {
+      "type": "section",
+      "text": { "type": "mrkdwn", "text": ":one: Instant incident preparedness" }
+    },
+    {
+      "type": "section",
+      "text": { "type": "mrkdwn", "text": ":two: Add another administrator" }
+    },
+    {
+      "type": "section",
+      "text": { "type": "mrkdwn", "text": ":three: Configure your team" }
+    },
+    {
+      "type": "section",
+      "text": { "type": "mrkdwn", "text": ":four: Launch the test" }
+    },
+    { "type": "divider" },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": { "type": "plain_text", "text": ":arrow_right: Get started", "emoji": true },
+          "action_id": "v2_welcome_next",
+          "value": "next",
+          "style": "primary"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        { "type": "mrkdwn", "text": ":bulb: Every step is a button — no commands to memorize." }
+      ]
+    }
+  ]
+}

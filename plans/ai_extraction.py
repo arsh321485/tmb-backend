@@ -152,8 +152,8 @@ def _parse_json_response(raw_text: str) -> dict | None:
     if not isinstance(data, dict):
         return None
 
-    # Normalize so downstream code (build_bia_ready_card etc.) can rely
-    # on these keys always existing, even if the model omitted them.
+    # Normalize so downstream code can rely on these keys always
+    # existing, even if the model omitted them.
     data.setdefault("rto", [])
     data.setdefault("rpo", [])
     data.setdefault("contacts", [])

@@ -1,0 +1,128 @@
+{
+  "channel": "#testmyplan-new-design-preview",
+  "text": "Step 1 · Organizational threats — generated for Veridian Health.",
+  "blocks": [
+    {
+      "type": "header",
+      "text": { "type": "plain_text", "text": ":dart: Step 1 · Organizational threats", "emoji": true }
+    },
+    {
+      "type": "context",
+      "elements": [
+        { "type": "mrkdwn", "text": ":red_circle: *4 threats*  ·  generated from your sign-up profile" }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ">Generated from what you told us at sign-up — nothing to fill in, and it comes first: the threats decide which modules you need admins and teams for. Drop anything that doesn't apply, change a criticality, or add a threat we missed."
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        { "type": "mrkdwn", "text": "*Sector*\nHealthcare provider" },
+        { "type": "mrkdwn", "text": "*Workforce*\n4,200 staff" },
+        { "type": "mrkdwn", "text": "*Regions*\nUK · EU" },
+        { "type": "mrkdwn", "text": "*Regulation*\nGDPR · NIS2 · DSPT" },
+        { "type": "mrkdwn", "text": "*Estate*\nCloud EHR · 3rd-party claims processor" }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        { "type": "mrkdwn", "text": ":red_circle: *2* Critical   |   :large_orange_circle: *1* High   |   :large_yellow_circle: *1* Med   |   ⚪ *0* Dropped" }
+      ]
+    },
+    { "type": "divider" },
+    {
+      "type": "context",
+      "elements": [{ "type": "mrkdwn", "text": ":shield: *Cybersecurity*  ·  2/2 kept" }]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":red_circle: *External attacker* — Critical · 2 incident(s)\n_Healthcare is the most-targeted ransomware sector, and your clinical systems run on a cloud EHR with a third-party claims processor attached._"
+      },
+      "accessory": {
+        "type": "overflow",
+        "action_id": "v2_threat_overflow",
+        "options": [
+          { "text": { "type": "plain_text", "text": "Change criticality" }, "value": "ext:change" },
+          { "text": { "type": "plain_text", "text": "Drop this threat" }, "value": "ext:drop" }
+        ]
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":large_orange_circle: *Insider* — High · 1 incident(s)\n_4,200 staff with broad access to patient records — leaver and negligent-sharing exposure scales with headcount._"
+      },
+      "accessory": {
+        "type": "overflow",
+        "action_id": "v2_threat_overflow",
+        "options": [
+          { "text": { "type": "plain_text", "text": "Change criticality" }, "value": "ins:change" },
+          { "text": { "type": "plain_text", "text": "Drop this threat" }, "value": "ins:drop" }
+        ]
+      }
+    },
+    { "type": "divider" },
+    {
+      "type": "context",
+      "elements": [{ "type": "mrkdwn", "text": ":lock: *Privacy*  ·  2/2 kept" }]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":red_circle: *Personal-data breach* — Critical · 2 incident(s)\n_Special-category health data under GDPR: a single misconfigured export is notifiable within 72 hours._"
+      },
+      "accessory": {
+        "type": "overflow",
+        "action_id": "v2_threat_overflow",
+        "options": [
+          { "text": { "type": "plain_text", "text": "Change criticality" }, "value": "breach:change" },
+          { "text": { "type": "plain_text", "text": "Drop this threat" }, "value": "breach:drop" }
+        ]
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": ":large_yellow_circle: *Data-subject rights* — Medium · 1 incident(s)\n_Patient-facing services at this scale attract coordinated subject-access campaigns._"
+      },
+      "accessory": {
+        "type": "overflow",
+        "action_id": "v2_threat_overflow",
+        "options": [
+          { "text": { "type": "plain_text", "text": "Change criticality" }, "value": "rights:change" },
+          { "text": { "type": "plain_text", "text": "Drop this threat" }, "value": "rights:drop" }
+        ]
+      }
+    },
+    { "type": "divider" },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": { "type": "plain_text", "text": "+ Add a threat we missed", "emoji": true },
+          "action_id": "v2_threat_add",
+          "value": "open"
+        },
+        {
+          "type": "button",
+          "text": { "type": "plain_text", "text": "Confirm organizational threats", "emoji": true },
+          "action_id": "v2_threats_done",
+          "value": "next",
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}

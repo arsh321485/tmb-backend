@@ -70,6 +70,26 @@ def provision_exercise_channel(scenario_name: str, inviter_slack_user_id: str, b
     return {"id": channel_id, "name": created["channel"]["name"]}
 
 
+def invite_participants(channel_id: str, slack_user_ids: list[str], bot_token: str) -> list[str]:
+    """
+    A7: invite people beyond the core admin/response teams into a
+    specific exercise's channel -- a vendor, an exec, anyone with a real
+    Slack account in this workspace who needs to be in on this one test.
+    Invited one at a time (not a single comma-separated call) so one bad
+    ID (already in the channel, doesn't exist, etc.) doesn't block
+    everyone else. Returns the list of user IDs that failed to invite.
+    """
+    failed = []
+    for user_id in slack_user_ids:
+        try:
+            _call("conversations.invite", bot_token, channel=channel_id, users=user_id)
+        except SlackApiError as exc:
+            if exc.args and exc.args[0] == "already_in_channel":
+                continue  # not a real failure -- they're already there
+            failed.append(user_id)
+    return failed
+
+
 def archive_exercise_channel(channel_id: str, bot_token: str) -> None:
     _call(
         "chat.postMessage",
