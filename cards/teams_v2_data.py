@@ -568,6 +568,30 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
     for i, member in enumerate(members):
         blocks.extend(_member_block(team_id, i, member, by_code, resp_mapped, dm_open))
 
+    # Sir's call: for a small company, the same 2-3 people run every team
+    # -- once this team's Role/Member/Backup is filled, let the admin copy
+    # the exact same assignment onto sibling teams instead of re-entering
+    # it per team. A modal (not inline checkboxes) -- a plain message has
+    # no reliable way to carry a checkbox's checked state between one
+    # click and the next, a modal's submission does.
+    if members:
+        siblings = [t for t in ALL_TEAMS if t["tier"] == team["tier"] and t["id"] != team_id]
+        if siblings:
+            blocks.append({"type": "divider"})
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": ":twisted_rightwards_arrows: Copy to other teams", "emoji": True},
+                            "action_id": "v2_team_copy_open",
+                            "value": team_id,
+                        }
+                    ],
+                }
+            )
+
     is_mapping = map_state and map_state.get("team_id") == team_id
 
     if is_mapping:
@@ -625,6 +649,21 @@ def build_teams_card(state: dict, people: list) -> dict:
             ],
         },
     ]
+
+    if not ready:
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": ":clipboard: Assign all at once", "emoji": True},
+                        "action_id": "v2_team_bulk_assign_open",
+                        "value": "open",
+                    }
+                ],
+            }
+        )
 
     blocks.append({"type": "divider"})
 

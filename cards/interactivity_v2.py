@@ -30,7 +30,7 @@ from .scenario_v2_data import build_scenario_card
 from . import teams_v2_data
 from .teams_v2_data import ADD_CUSTOM_ROLE_VALUE, build_teams_card
 from .teams_v2_data import read_current_state as read_teams_state
-from .test_plan_v2_data import build_test_plan_card
+from .test_plan_v2_data import build_real_test_plan_card, build_test_plan_card
 from .threat_map_v2_data import build_threat_map_card
 from .threats_v2_data import build_org_threats_card, read_current_state
 from .trigger_v2_data import build_live_card, build_trigger_card
@@ -58,8 +58,34 @@ def _replace_message(response_url: str, card: dict) -> None:
 def _redraw_threats(response_url: str, state: dict, slack_team_id: str = "") -> None:
     from . import org_setup_v2
 
+    if slack_team_id:
+        # Real persistence for the drill-down position (which Module/
+        # Criticality/Threat/Incident/Cause/Phase/Scenario tab is open) --
+        # previously purely reconstructed from the Slack message, so it
+        # reset to blank on every nav jump / fresh load. Restore it here
+        # if the caller didn't already set it (e.g. coming straight from
+        # persistence_v2.load_threats_state, which has no nav fields at
+        # all), and save whatever the state ends up being after this click.
+        saved_nav = persistence_v2.load_threat_profile_nav(slack_team_id)
+        for field in persistence_v2.NAV_FIELDS:
+            if field not in state:
+                state[field] = saved_nav.get(field)
+
+        # Phase/Scenario default to Identification/Trigger the first time a
+        # (module, threat, incident, cause) combo is reached -- the card
+        # builder mutates this set in place the moment it defaults one, so
+        # it has to be read BEFORE building the card and saved AFTER, not
+        # alongside the nav fields above.
+        state["visited_combos"] = persistence_v2.load_visited_combos(slack_team_id)
+
     profile = org_setup_v2.load_profile(slack_team_id) if slack_team_id else None
-    _replace_message(response_url, with_nav_bar_v2(build_org_threats_card(state, profile), "org_threats"))
+    card = build_org_threats_card(state, profile)
+
+    if slack_team_id:
+        persistence_v2.save_threat_profile_nav(slack_team_id, state)
+        persistence_v2.save_visited_combos(slack_team_id, state["visited_combos"])
+
+    _replace_message(response_url, with_nav_bar_v2(card, "org_threats"))
 
 
 def _redraw_admins(response_url: str, bot_token: str, current_user_id: str, state: dict) -> None:
@@ -296,17 +322,40 @@ def handle_block_action_v2(payload: dict) -> None:
         _redraw_threats(response_url, state, slack_team_id)
         return
 
-    if action_id.startswith("v2_threat_pick_cause__"):
-        # Sir's call: fold the old separate "Threat map" step's incident/
-        # cause drill-down into the Threat Profile card directly (same
-        # taxonomy, just shown here) -- clicking a cause goes straight
-        # into picking its scenario, no separate step in between.
-        module, threat_id, incident_id, cause_id = action.get("value", "").split(":", 3)
-        persistence_v2.save_scenario_selection(
-            slack_team_id, module, threat_id=threat_id, incident_id=incident_id, cause_id=cause_id, scenario_id=""
-        )
-        card = build_scenario_card(module, threat_id, incident_id, cause_id)
-        _replace_message(response_url, with_nav_bar_v2(card, "org_threats"))
+    if action_id.startswith("v2_threat_cause_tab__"):
+        state = read_current_state(message_blocks)
+        saved = persistence_v2.load_threats_state(slack_team_id)
+        state["fixed"], state["custom"] = saved["fixed"], saved["custom"]
+        state["active_cause"] = action.get("value", "")
+        state["active_phase"] = None
+        state["active_scenario"] = None
+        _redraw_threats(response_url, state, slack_team_id)
+        return
+
+    if action_id.startswith("v2_threat_phase_tab__"):
+        state = read_current_state(message_blocks)
+        saved = persistence_v2.load_threats_state(slack_team_id)
+        state["fixed"], state["custom"] = saved["fixed"], saved["custom"]
+        _, plan_id, phase = action_id.split("__", 2)
+        state["active_phase"] = phase
+        state["active_scenario"] = None
+        _redraw_threats(response_url, state, slack_team_id)
+        return
+
+    if action_id.startswith("v2_threat_scenario_tab__"):
+        state = read_current_state(message_blocks)
+        saved = persistence_v2.load_threats_state(slack_team_id)
+        state["fixed"], state["custom"] = saved["fixed"], saved["custom"]
+        _, plan_id, phase, scenario = action_id.split("__", 3)
+        state["active_phase"] = phase
+        state["active_scenario"] = scenario
+        _redraw_threats(response_url, state, slack_team_id)
+        return
+
+    if action_id == "v2_threat_trigger":
+        plan_id, phase, scenario = action.get("value", "").split(":", 2)
+        card = build_real_test_plan_card(plan_id, phase, scenario)
+        _replace_message(response_url, with_nav_bar_v2(card, "test_plan"))
         return
 
     if action_id == "v2_nav_jump__org_threats":
@@ -404,6 +453,18 @@ def handle_block_action_v2(payload: dict) -> None:
         state = read_teams_state(message_blocks)
         state["add"] = {"team_id": action.get("value", ""), "role": None, "primary": [], "backup": []}
         _redraw_teams(response_url, bot_token, state)
+        return
+
+    if action_id == "v2_team_bulk_assign_open":
+        from . import bulk_assign_modal_v2
+
+        trigger_id = payload.get("trigger_id", "")
+        channel_id = payload.get("channel", {}).get("id", "")
+        message_ts = payload.get("message", {}).get("ts", "")
+        if trigger_id and channel_id and bot_token:
+            people = get_workspace_people(bot_token)
+            saved = persistence_v2.load_teams_state(slack_team_id)
+            bulk_assign_modal_v2.open_modal(trigger_id, channel_id, message_ts, people, saved["teams"], bot_token)
         return
 
     def _open_custom_text_modal(field: str, state: dict) -> None:
@@ -505,6 +566,17 @@ def handle_block_action_v2(payload: dict) -> None:
         # If required fields are missing, leave the form open as-is
         # rather than silently discarding what's already picked.
         _redraw_teams(response_url, bot_token, state)
+        return
+
+    if action_id == "v2_team_copy_open":
+        from . import team_copy_modal_v2
+
+        source_team_id = action.get("value", "")
+        trigger_id = payload.get("trigger_id", "")
+        channel_id = payload.get("channel", {}).get("id", "")
+        message_ts = payload.get("message", {}).get("ts", "")
+        if trigger_id and channel_id and bot_token and source_team_id:
+            team_copy_modal_v2.open_modal(trigger_id, source_team_id, channel_id, message_ts, bot_token)
         return
 
     if action_id == "v2_team_add_cancel":
@@ -744,6 +816,17 @@ def handle_block_action_v2(payload: dict) -> None:
             slack_team_id, module, scenario_id=scenario, armed=True, armed_at=datetime.datetime.utcnow()
         )
         card = build_trigger_card(module, scenario)
+        _replace_message(response_url, with_nav_bar_v2(card, "trigger"))
+        return
+
+    if action_id == "v2_plan_arm_real":
+        plan_id, phase, scenario = action.get("value", "").split(":", 2)
+        import datetime
+
+        persistence_v2.save_scenario_selection(
+            slack_team_id, plan_id, scenario_id=scenario, armed=True, armed_at=datetime.datetime.utcnow()
+        )
+        card = build_trigger_card(plan_id, scenario)
         _replace_message(response_url, with_nav_bar_v2(card, "trigger"))
         return
 

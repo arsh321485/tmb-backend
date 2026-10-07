@@ -14,7 +14,7 @@ import logging
 
 import mongoengine
 
-from cards import admin_invite_modal_v2, org_setup_v2, team_role_modal_v2
+from cards import admin_invite_modal_v2, bulk_assign_modal_v2, org_setup_v2, team_copy_modal_v2, team_role_modal_v2
 from home_tab.models import ProcessedSlackEvent
 from workspaces.models import get_bot_token
 
@@ -54,6 +54,10 @@ def handle_view_submission(payload: dict) -> None:
         admin_invite_modal_v2.handle_submission(payload, bot_token)
     elif callback_id == org_setup_v2.CALLBACK_ID:
         org_setup_v2.handle_submission(payload, bot_token)
+    elif callback_id == bulk_assign_modal_v2.CALLBACK_ID:
+        bulk_assign_modal_v2.handle_submission(payload, bot_token)
+    elif callback_id == team_copy_modal_v2.CALLBACK_ID:
+        team_copy_modal_v2.handle_submission(payload, bot_token)
     else:
         logger.info("view_submission with no handler: callback_id=%s", callback_id)
 

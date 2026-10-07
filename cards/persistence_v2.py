@@ -37,6 +37,32 @@ def save_threats_state(team_id: str, state: dict) -> None:
     setup.save()
 
 
+NAV_FIELDS = ("active_module", "active_crit", "active_threat", "active_incident", "active_cause", "active_phase", "active_scenario")
+
+
+def load_threat_profile_nav(team_id: str) -> dict:
+    setup = AdminSetup.objects(team_id=team_id).first()
+    nav = (setup.threat_profile_nav if setup else {}) or {}
+    return {field: nav.get(field) for field in NAV_FIELDS}
+
+
+def save_threat_profile_nav(team_id: str, nav: dict) -> None:
+    setup = _get_or_create(team_id)
+    setup.threat_profile_nav = {field: nav.get(field) for field in NAV_FIELDS}
+    setup.save()
+
+
+def load_visited_combos(team_id: str) -> set:
+    setup = AdminSetup.objects(team_id=team_id).first()
+    return set(setup.threat_profile_visited_combos) if setup else set()
+
+
+def save_visited_combos(team_id: str, combos: set) -> None:
+    setup = _get_or_create(team_id)
+    setup.threat_profile_visited_combos = list(combos)
+    setup.save()
+
+
 def load_admins_state(team_id: str) -> dict:
     setup = AdminSetup.objects(team_id=team_id).first()
     assigned = dict(setup.module_admins) if setup else {}

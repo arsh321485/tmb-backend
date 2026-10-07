@@ -55,8 +55,8 @@ CRIT_EMOJI = {"Critical": "🔴", "High": "🟠", "Med": "🟡", "Dropped": "⚪
 ADD_CRIT_CHOICES = ["Critical", "High", "Med"]  # a newly added threat can't start "Dropped"
 
 
-def _select_option(value: str) -> dict:
-    return {"text": {"type": "plain_text", "text": value}, "value": value}
+def _select_option(value: str, label: str | None = None) -> dict:
+    return {"text": {"type": "plain_text", "text": label or value}, "value": value}
 
 
 def _threat_block(block_id: str, label: str, module: str, incidents, why: str, current_crit: str) -> dict:
@@ -85,6 +85,9 @@ def read_current_state(message_blocks: list) -> dict:
     active_crit = None
     active_threat = None
     active_incident = None
+    active_cause = None
+    active_phase = None
+    active_scenario = None
 
     for block in message_blocks:
         block_id = block.get("block_id", "")
@@ -100,6 +103,15 @@ def read_current_state(message_blocks: list) -> dict:
 
         elif block_id.startswith("threatinc|"):
             active_incident = block_id.removeprefix("threatinc|")
+
+        elif block_id.startswith("threatcause|"):
+            active_cause = block_id.removeprefix("threatcause|")
+
+        elif block_id.startswith("threatphase|"):
+            active_phase = block_id.removeprefix("threatphase|")
+
+        elif block_id.startswith("threatscenario|"):
+            active_scenario = block_id.removeprefix("threatscenario|")
 
         elif block_id.startswith("threat_"):
             key = block_id.removeprefix("threat_")
@@ -132,6 +144,7 @@ def read_current_state(message_blocks: list) -> dict:
     return {
         "fixed": fixed, "custom": custom, "form": form, "active_module": active_module,
         "active_crit": active_crit, "active_threat": active_threat, "active_incident": active_incident,
+        "active_cause": active_cause, "active_phase": active_phase, "active_scenario": active_scenario,
     }
 
 
@@ -279,7 +292,11 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
             tags.append(f"*REGULATION*  {' · '.join(profile['regulations'])}")
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "   ".join(tags)}]})
 
-    active_module = state.get("active_module") or MODULES[0]
+    # Strict step-by-step disclosure (sir's call): nothing below a level
+    # shows until that level has been explicitly clicked -- no
+    # auto-selecting "the first one" so the card doesn't dump every level
+    # on screen before the admin has actually drilled in.
+    active_module = state.get("active_module")
     module_icon = {"Cybersecurity": ":shield:", "Privacy": ":lock:"}
 
     # Sub-tabs like the Teams card's tier tabs -- one module shown at a
@@ -300,7 +317,7 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
                 **({"style": "primary"} if module == active_module else {}),
             }
         )
-    blocks.append({"type": "actions", "block_id": f"threatmodule|{active_module}", "elements": tab_elements})
+    blocks.append({"type": "actions", "block_id": f"threatmodule|{active_module or ''}", "elements": tab_elements})
     blocks.append({"type": "divider"})
 
     # All threats (fixed + custom) for the active module, each carrying
@@ -321,7 +338,7 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
     present_crits = [c for c in CRIT_OPTIONS if any(i["crit"] == c for i in mod_items)]
     active_crit = state.get("active_crit")
     if active_crit not in present_crits:
-        active_crit = present_crits[0] if present_crits else None
+        active_crit = None
 
     if present_crits:
         crit_tab_elements = [
@@ -334,7 +351,7 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
             }
             for c in present_crits
         ]
-        blocks.append({"type": "actions", "block_id": f"threatcrit|{active_crit}", "elements": crit_tab_elements})
+        blocks.append({"type": "actions", "block_id": f"threatcrit|{active_crit or ''}", "elements": crit_tab_elements})
 
     items_in_crit = [i for i in mod_items if i["crit"] == active_crit] if active_crit else []
 
@@ -343,9 +360,10 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
     # below, no extra "Open" click.
     active_threat = state.get("active_threat")
     if not any(i["key"] == active_threat for i in items_in_crit):
-        active_threat = items_in_crit[0]["key"] if items_in_crit else None
+        active_threat = None
 
     if items_in_crit:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`THREAT`"}]})
         threat_tab_elements = [
             {
                 "type": "button",
@@ -356,14 +374,14 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
             }
             for i in items_in_crit
         ]
-        blocks.append({"type": "actions", "block_id": f"threattab|{active_threat}", "elements": threat_tab_elements})
+        blocks.append({"type": "actions", "block_id": f"threattab|{active_threat or ''}", "elements": threat_tab_elements})
 
     active_item = next((i for i in items_in_crit if i["key"] == active_threat), None)
     if active_item:
         if active_item["crit"] == "Dropped":
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f":large_blue_diamond: `THREAT`  *{active_item['label']}*\n_Dropped — won't be part of this test._"}})
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "_Dropped — won't be part of this test._"}})
         else:
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f":large_blue_diamond: `THREAT`  *{active_item['label']}*\n_{active_item['why']}_"}})
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"_{active_item['why']}_"}})
 
             # Incident tabs, reusing the same real taxonomy the later
             # Threat map step already has (same threat IDs) -- shown
@@ -380,8 +398,9 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
             if incidents:
                 active_incident = state.get("active_incident")
                 if not any(inc["id"] == active_incident for inc in incidents):
-                    active_incident = incidents[0]["id"]
+                    active_incident = None
 
+                blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`INCIDENT`"}]})
                 inc_tab_elements = [
                     {
                         "type": "button",
@@ -392,26 +411,104 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
                     }
                     for inc in incidents
                 ]
-                blocks.append({"type": "actions", "block_id": f"threatinc|{active_incident}", "elements": inc_tab_elements})
+                blocks.append({"type": "actions", "block_id": f"threatinc|{active_incident or ''}", "elements": inc_tab_elements})
 
                 selected_incident = next((inc for inc in incidents if inc["id"] == active_incident), None)
-                if selected_incident:
-                    blocks.append(
-                        {"type": "section", "text": {"type": "mrkdwn", "text": f":large_purple_circle: `INCIDENT`  *{selected_incident['name']}*"}}
-                    )
-                    for cause in selected_incident["causes"]:
-                        blocks.append(
-                            {
-                                "type": "section",
-                                "text": {"type": "mrkdwn", "text": f":large_green_circle: `CAUSE`  {cause['name']}"},
-                                "accessory": {
+                if selected_incident and selected_incident["causes"]:
+                    causes = selected_incident["causes"]
+                    active_cause = state.get("active_cause")
+                    if not any(c["id"] == active_cause for c in causes):
+                        active_cause = None
+
+                    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`CAUSE`"}]})
+                    cause_tab_elements = [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": c["name"], "emoji": True},
+                            "action_id": f"v2_threat_cause_tab__{c['id']}",
+                            "value": c["id"],
+                            **({"style": "primary"} if c["id"] == active_cause else {}),
+                        }
+                        for c in causes
+                    ]
+                    blocks.append({"type": "actions", "block_id": f"threatcause|{active_cause or ''}", "elements": cause_tab_elements})
+
+                    selected_cause = next((c for c in causes if c["id"] == active_cause), None)
+                    if selected_cause:
+                        from .plan_catalog_v2 import find_plan_id_for_taxonomy, phases_for_plan, steps_for_phase
+
+                        plan_id = find_plan_id_for_taxonomy(active_module, raw_key, selected_incident["id"], selected_cause["id"])
+                        if plan_id:
+                            phases = phases_for_plan(plan_id)
+
+                            # Sir's call: Phase/Scenario default to the first
+                            # one (Identification/Trigger) the FIRST time
+                            # this exact threat->incident->cause combo is
+                            # reached -- a repeat visit stays strict, no
+                            # auto-pick, same as every level above. "First
+                            # time" is tracked in Mongo (visited_combos),
+                            # not just read off the message, since the
+                            # message resets every reload.
+                            combo_key = f"{active_module}|{raw_key}|{selected_incident['id']}|{selected_cause['id']}"
+                            visited_combos = state.setdefault("visited_combos", set())
+                            first_visit = combo_key not in visited_combos
+                            if first_visit:
+                                visited_combos.add(combo_key)
+
+                            active_phase = state.get("active_phase")
+                            if active_phase not in phases:
+                                active_phase = phases[0] if (first_visit and phases) else None
+
+                            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`PHASE`"}]})
+                            phase_tab_elements = [
+                                {
                                     "type": "button",
-                                    "text": {"type": "plain_text", "text": "See scenarios →", "emoji": True},
-                                    "action_id": f"v2_threat_pick_cause__{cause['id']}",
-                                    "value": f"{active_module}:{raw_key}:{selected_incident['id']}:{cause['id']}",
-                                },
-                            }
-                        )
+                                    "text": {"type": "plain_text", "text": p, "emoji": True},
+                                    "action_id": f"v2_threat_phase_tab__{plan_id}__{p}",
+                                    "value": p,
+                                    **({"style": "primary"} if p == active_phase else {}),
+                                }
+                                for p in phases
+                            ]
+                            blocks.append({"type": "actions", "block_id": f"threatphase|{active_phase or ''}", "elements": phase_tab_elements})
+
+                            steps = steps_for_phase(plan_id, active_phase) if active_phase else []
+                            if steps:
+                                active_scenario = state.get("active_scenario")
+                                if not any(s["scenario"] == active_scenario for s in steps):
+                                    active_scenario = steps[0]["scenario"] if first_visit else None
+
+                                blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`SCENARIO`"}]})
+                                scenario_tab_elements = [
+                                    {
+                                        "type": "button",
+                                        "text": {"type": "plain_text", "text": s["scenario"], "emoji": True},
+                                        "action_id": f"v2_threat_scenario_tab__{plan_id}__{active_phase}__{s['scenario']}",
+                                        "value": s["scenario"],
+                                        **({"style": "primary"} if s["scenario"] == active_scenario else {}),
+                                    }
+                                    for s in steps
+                                ]
+                                blocks.append({"type": "actions", "block_id": f"threatscenario|{active_scenario or ''}", "elements": scenario_tab_elements})
+
+                                if active_scenario:
+                                    blocks.append({"type": "divider"})
+                                    blocks.append(
+                                        {
+                                            "type": "actions",
+                                            "elements": [
+                                                {
+                                                    "type": "button",
+                                                    "text": {"type": "plain_text", "text": ":rotating_light: Trigger", "emoji": True},
+                                                    "action_id": "v2_threat_trigger",
+                                                    "value": f"{plan_id}:{active_phase}:{active_scenario}",
+                                                    "style": "danger",
+                                                }
+                                            ],
+                                        }
+                                    )
+                        else:
+                            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No real test plan mapped for this cause yet._"}]})
             elif not active_item["custom"]:
                 blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No incidents mapped for this threat yet._"}]})
 
@@ -419,10 +516,5 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
 
     if form is not None:
         blocks.extend(_add_form_blocks(form, custom))
-
-    blocks.append({"type": "divider"})
-    blocks.append(
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": "_Pick a cause above and click \"See scenarios\" to continue._"}]}
-    )
 
     return {"blocks": blocks}

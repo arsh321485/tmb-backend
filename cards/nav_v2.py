@@ -12,7 +12,6 @@ NAV_STEPS_V2 = [
     ("Configure Teams", "teams"),
     ("Threat Profile", "org_threats"),
     ("TestMyPlan", "test_plan"),
-    ("Trigger", "trigger"),
 ]
 
 

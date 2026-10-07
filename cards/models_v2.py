@@ -34,6 +34,20 @@ class AdminSetup(me.Document):
     # {"cyber": "U0123", "privacy": "U0456"}
     module_admins = me.DictField(default=dict)
 
+    # Threat Profile card's drill-down position -- which Module/
+    # Criticality/Threat/Incident/Cause/Phase/Scenario tab is currently
+    # open. Previously reconstructed purely by re-reading the Slack
+    # message on every click (read_current_state) -- real persistence so
+    # it survives beyond that one message (e.g. telling first-time-through
+    # a combo apart from a repeat visit, once that feature is built).
+    threat_profile_nav = me.DictField(default=dict)
+
+    # Which (module, threat, incident, cause) combos have already had their
+    # Phase/Scenario auto-defaulted once -- sir's call: Phase defaults to
+    # Identification and Scenario to Trigger the FIRST time a combo is
+    # reached, but not on a repeat visit (then the admin picks fresh).
+    threat_profile_visited_combos = me.ListField(me.StringField(), default=list)
+
     updated_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
     meta = {"collection": "admin_setups", "strict": False}
