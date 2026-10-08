@@ -34,8 +34,8 @@ def build_modal_view(source_team_id: str, channel_id: str = "", message_ts: str 
     return {
         "type": "modal",
         "callback_id": CALLBACK_ID,
-        "title": {"type": "plain_text", "text": "Copy to other teams"},
-        "submit": {"type": "plain_text", "text": "Copy"},
+        "title": {"type": "plain_text", "text": "Apply to other teams"},
+        "submit": {"type": "plain_text", "text": "Apply"},
         "close": {"type": "plain_text", "text": "Cancel"},
         "private_metadata": json.dumps({"source_team_id": source_team_id, "channel_id": channel_id, "message_ts": message_ts}),
         "blocks": [
@@ -43,13 +43,13 @@ def build_modal_view(source_team_id: str, channel_id: str = "", message_ts: str 
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"Copies *{source_team_id} · {(source_team or {}).get('name', '')}*'s current Role/Member/Backup assignment onto every team picked below, overwriting whatever that team already has.",
+                    "text": f"Applies *{source_team_id} · {(source_team or {}).get('name', '')}*'s current Role/Member/Backup assignment onto every team picked below, overwriting whatever that team already has.",
                 },
             },
             {
                 "type": "input",
                 "block_id": "targets",
-                "label": {"type": "plain_text", "text": "Copy to"},
+                "label": {"type": "plain_text", "text": "Apply to"},
                 "element": {
                     "type": "multi_static_select",
                     "action_id": "value",

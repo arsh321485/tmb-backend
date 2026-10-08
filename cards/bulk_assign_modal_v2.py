@@ -47,7 +47,7 @@ def build_modal_view(people: list, teams_state: dict, channel_id: str = "", mess
         {
             "type": "context",
             "elements": [
-                {"type": "mrkdwn", "text": "One row per unstaffed mandatory team. Fill what you can, leave the rest blank — Save only fills in complete rows. The same person can be picked across multiple rows."}
+                {"type": "mrkdwn", "text": "One row per unstaffed mandatory team. Every row is required — the same person can be picked across multiple rows."}
             ],
         },
     ]
@@ -63,7 +63,6 @@ def build_modal_view(people: list, teams_state: dict, channel_id: str = "", mess
                 {
                     "type": "input",
                     "block_id": f"bulkrole_{team_id}",
-                    "optional": True,
                     "label": {"type": "plain_text", "text": "Role"},
                     "element": {
                         "type": "static_select",
@@ -77,7 +76,6 @@ def build_modal_view(people: list, teams_state: dict, channel_id: str = "", mess
                 {
                     "type": "input",
                     "block_id": f"bulkmember_{team_id}",
-                    "optional": True,
                     "label": {"type": "plain_text", "text": "Member"},
                     "element": {
                         "type": "static_select",
@@ -91,7 +89,6 @@ def build_modal_view(people: list, teams_state: dict, channel_id: str = "", mess
                 {
                     "type": "input",
                     "block_id": f"bulkbackup_{team_id}",
-                    "optional": True,
                     "label": {"type": "plain_text", "text": "Backup member"},
                     "element": {
                         "type": "static_select",

@@ -584,7 +584,7 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
                     "elements": [
                         {
                             "type": "button",
-                            "text": {"type": "plain_text", "text": ":twisted_rightwards_arrows: Copy to other teams", "emoji": True},
+                            "text": {"type": "plain_text", "text": ":twisted_rightwards_arrows: Apply to other teams", "emoji": True},
                             "action_id": "v2_team_copy_open",
                             "value": team_id,
                         }
