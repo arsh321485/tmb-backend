@@ -10,7 +10,7 @@ import logging
 
 from cards.slack_client import SlackApiError, _call
 
-from .models import Exercise, ExerciseTask
+from .models import STATUS_RUNNING, Exercise, ExerciseTask
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,7 @@ def send_drill_tasks(exercise: Exercise, bot_token: str, by_code: dict) -> list:
                 action=mapped.get("action", ""),
                 detail=mapped.get("detail", ""),
                 phase=mapped.get("phase", ""),
+                was_acknowledged=primary_id in (tm.acknowledged_by or {}),
             )
             task.save()
             tasks.append(task)
@@ -81,6 +82,17 @@ def _send_task_dm(task: ExerciseTask, bot_token: str, is_backup: bool = False) -
             ],
         },
     ]
+    if not task.was_acknowledged:
+        # They're being paged for a role they never confirmed being ready
+        # for (no real "I acknowledge" on file) -- still sent, since
+        # skipping them would leave the role uncovered during a drill,
+        # but flagged so it's visible to them and in the report.
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": ":warning: You haven't acknowledged this role yet — this is your first time hearing about it."}],
+            }
+        )
     if task.responsibility_text:
         blocks.append(
             {
@@ -124,6 +136,93 @@ def _send_task_dm(task: ExerciseTask, bot_token: str, is_backup: bool = False) -
     )
 
 
+def fire_exercise(exercise: Exercise, bot_token: str) -> None:
+    """
+    The real "go live" moment -- posts the war-room alarm and DMs every
+    real staffed team member their job. Shared by the immediate paths
+    ("now"/"surprise", fired straight from the click) and by
+    fire_due_scheduled_exercises below ("sched", fired later by the
+    background check once its scheduled_at arrives) so there's exactly
+    one place that does the actual firing.
+    """
+    from cards.trigger_v2_data import TRIGGER_LABELS
+
+    if exercise.slack_channel_id and bot_token:
+        alarm_blocks = [
+            {"type": "header", "text": {"type": "plain_text", "text": ":rotating_light: Incident detected", "emoji": True}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": f"*{exercise.scenario_name}*"}},
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"{TRIGGER_LABELS.get(exercise.trigger_type, exercise.trigger_type)} · this is a TestMyPlan readiness drill — do not action externally.",
+                    }
+                ],
+            },
+        ]
+        _call(
+            "chat.postMessage",
+            bot_token,
+            channel=exercise.slack_channel_id,
+            text=f"Incident detected — {exercise.scenario_name}",
+            blocks=alarm_blocks,
+        )
+
+    if bot_token:
+        from cards.slack_members_v2 import get_workspace_people
+
+        people = get_workspace_people(bot_token)
+        by_code = {p["i"]: p for p in people}
+        send_drill_tasks(exercise, bot_token, by_code)
+
+    # Real injects + scored decisions (sir's TMP_Ransomware_Injects.xlsx)
+    # -- only for a drill reached through the real-plan path, where
+    # exercise.module carries the real plan_id (e.g. "RW-01") instead of
+    # a generic "Cybersecurity"/"Privacy" module name. Starts the real
+    # inject sequence at seq 1; each answered decision releases the next
+    # one (cards/inject_drill_v2.py).
+    if bot_token:
+        from cards.inject_catalog_v2 import injects_for_plan
+        from cards.inject_drill_v2 import send_inject
+
+        sequence = injects_for_plan(exercise.module)
+        if exercise.inject_phase:
+            # Phase-scoped trigger -- start at that phase's own first
+            # inject instead of always the whole plan's first one.
+            sequence = [i for i in sequence if i["phase"] == exercise.inject_phase]
+        if sequence:
+            send_inject(exercise, sequence[0], bot_token)
+
+
+def fire_due_scheduled_exercises() -> int:
+    """
+    Finds every "scheduled" exercise whose scheduled_at has arrived, fires
+    it for real, and flips it to "running". Meant to be called on a
+    recurring timer (see exercises/apps.py), same pattern as
+    escalate_overdue_tasks.
+    """
+    from workspaces.models import get_bot_token
+
+    due = Exercise.objects(status="scheduled", scheduled_at__lte=datetime.datetime.utcnow())
+
+    count = 0
+    for exercise in due:
+        bot_token = get_bot_token(exercise.slack_team_id)
+        if not bot_token:
+            continue
+        try:
+            fire_exercise(exercise, bot_token)
+        except SlackApiError:
+            logger.exception("Failed to fire scheduled exercise %s", exercise.id)
+            continue
+        exercise.status = STATUS_RUNNING
+        exercise.save()
+        count += 1
+
+    return count
+
+
 def escalate_overdue_tasks() -> int:
     """
     Step 5 -- finds every task still "sent" (nobody clicked Done) past
@@ -152,6 +251,14 @@ def escalate_overdue_tasks() -> int:
         if not bot_token:
             continue
 
+        from cards.models_v2 import Team, TeamMember
+
+        was_acknowledged = False
+        team_doc = Team.objects(team_id=exercise.slack_team_id, name=task.team_name).first()
+        tm = TeamMember.objects(team=team_doc, role=task.role).first() if team_doc else None
+        if tm:
+            was_acknowledged = task.backup_slack_user_id in (tm.acknowledged_by or {})
+
         backup_task = ExerciseTask(
             exercise=exercise,
             team_name=task.team_name,
@@ -160,6 +267,7 @@ def escalate_overdue_tasks() -> int:
             is_backup=True,
             primary_slack_user_id=task.primary_slack_user_id,
             backup_slack_user_id=task.backup_slack_user_id,
+            was_acknowledged=was_acknowledged,
             responsibility_text=task.responsibility_text,
             action=task.action,
             detail=task.detail,

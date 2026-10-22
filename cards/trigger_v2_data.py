@@ -34,6 +34,26 @@ def build_trigger_card(module: str, scenario: str, picked: str = "") -> dict:
                 },
             }
         )
+
+    # A scheduled/surprise drill is armed and waiting in the background --
+    # let the admin actually cancel it instead of being stuck with no way
+    # to undo a wrong date or an unwanted surprise window.
+    if picked in ("sched", "surprise"):
+        blocks.append({"type": "divider"})
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": ":x: Cancel", "emoji": True},
+                        "action_id": "v2_trigger_cancel_scheduled",
+                        "value": f"{module}:{scenario}",
+                        "style": "danger",
+                    }
+                ],
+            }
+        )
     return {"blocks": blocks}
 
 

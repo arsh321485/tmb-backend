@@ -174,6 +174,14 @@ def find_team(team_id: str) -> dict | None:
     return next((t for t in ALL_TEAMS if t["id"] == team_id), None)
 
 
+def find_team_by_name(name: str) -> dict | None:
+    """Matches a team's real name back to its catalog entry -- the plan
+    spreadsheet's "teams" column uses the exact same names as this
+    catalog, so this is how a plan step's team text becomes a real
+    team_id to look up the actual assigned primary/backup."""
+    return next((t for t in ALL_TEAMS if t["name"] == name), None)
+
+
 # Real per-team roles from sir's "IR Team Catalog TestMyPlan - For Dev.xlsx"
 # (Roles sheet) -- each team has its OWN specific roles, not the same
 # generic 8 roles reused everywhere. "priority" here is Mandatory /

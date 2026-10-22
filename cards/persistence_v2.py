@@ -78,12 +78,13 @@ def save_admins_state(team_id: str, assigned: dict) -> None:
 def load_scenario_selection(team_id: str, module: str) -> dict:
     sel = ScenarioSelection.objects(team_id=team_id, module=module).first()
     if sel is None:
-        return {"threat_id": "", "incident_id": "", "cause_id": "", "scenario_id": "", "armed": False, "armed_at": None}
+        return {"threat_id": "", "incident_id": "", "cause_id": "", "scenario_id": "", "phase": "", "armed": False, "armed_at": None}
     return {
         "threat_id": sel.threat_id or "",
         "incident_id": sel.incident_id or "",
         "cause_id": sel.cause_id or "",
         "scenario_id": sel.scenario_id or "",
+        "phase": getattr(sel, "phase", "") or "",
         "armed": sel.armed,
         "armed_at": sel.armed_at,
     }
@@ -105,6 +106,26 @@ def _team_module_and_name(team_key: str) -> tuple:
     if t:
         return t["tier"], t["name"], t["tier"] == "Mandatory"
     return "Custom", team_key, False
+
+
+def load_acknowledgments(team_id: str) -> dict:
+    """
+    {(catalog_team_id, role): {slack_user_id, ...}} -- who has actually
+    acknowledged each role (Welcome -> Role -> Acknowledge flow), for the
+    Test Plan summary to show readiness without needing a drill to have
+    fired first. Kept separate from load_teams_state so every other
+    caller of that function is unaffected.
+    """
+    from .team_catalog_v2 import ALL_TEAMS
+
+    by_role = {}
+    for team_doc in Team.objects(team_id=team_id):
+        slug = team_doc.slug
+        if not any(t["id"] == slug for t in ALL_TEAMS):
+            continue
+        for tm in TeamMember.objects(team=team_doc):
+            by_role[(slug, tm.role)] = set((tm.acknowledged_by or {}).keys())
+    return by_role
 
 
 def load_teams_state(team_id: str) -> dict:

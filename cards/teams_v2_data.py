@@ -19,6 +19,17 @@ from .team_catalog_v2 import ALL_TEAMS, MANDATORY_TEAM_IDS, TIERS, TIER_EMOJI, f
 ADD_CUSTOM_ROLE_VALUE = "__add_custom__"
 ADD_CUSTOM_RESP_VALUE = "__add_custom_resp__"
 
+
+def _short_team_name(name: str) -> str:
+    """The real team names are long and get cut mid-word on a tab button
+    ("...Detection..."). Most follow "Short Name (Detail)" or "Short Name
+    / Detail" -- take just the short part for the tab label; the full
+    name still shows in the team's own detail panel."""
+    for sep in (" (", " / "):
+        if sep in name:
+            return name.split(sep)[0]
+    return name
+
 # Same role catalog as the design mockup -- a starting point offered for
 # any team, since a curated list per team (35 very different team types)
 # isn't realistic to maintain. "+ Type a role…" always covers anything
@@ -110,6 +121,7 @@ def read_current_state(message_blocks: list) -> dict:
     dm_open = set()
     active_tier = "Mandatory"
     expanded_team = None
+    active_priority = None
 
     for block in message_blocks or []:
         block_id = block.get("block_id", "")
@@ -123,6 +135,28 @@ def read_current_state(message_blocks: list) -> dict:
 
         elif block_id.startswith("teamexpand|"):
             expanded_team = block_id.removeprefix("teamexpand|") or None
+
+        elif block_id.startswith("teampriority|"):
+            _, _team_id, priority = block_id.split("|", 2)
+            active_priority = priority or None
+
+        elif block_id.startswith("teamrolepick|"):
+            _, team_id, role = block_id.split("|", 2)
+            member = next((m for m in teams.setdefault(team_id, []) if m["role"] == role), None)
+            for el in block.get("elements", []):
+                option = el.get("initial_option")
+                if not option:
+                    continue
+                value = option.get("value")
+                if value in (None, "__none__"):
+                    continue
+                if member is None:
+                    member = {"role": role, "primary": [], "backup": []}
+                    teams[team_id].append(member)
+                if el.get("action_id") == "v2_team_role_primary_select":
+                    member["primary"] = [value]
+                elif el.get("action_id") == "v2_team_role_backup_select":
+                    member["backup"] = [value]
 
         elif block_id.startswith("teammember|"):
             _, team_id, role, primary_csv, backup_csv = block_id.split("|", 4)
@@ -196,6 +230,7 @@ def read_current_state(message_blocks: list) -> dict:
     return {
         "teams": teams, "resp": resp, "add": add, "map": map_state,
         "dm_open": dm_open, "active_tier": active_tier, "expanded_team": expanded_team,
+        "active_priority": active_priority,
     }
 
 
@@ -521,52 +556,185 @@ def _map_flow_blocks(team: dict, members: list, resp_mapped: list, map_state: di
 
 
 _TIER_TONE_EMOJI = {"Mandatory": ":red_circle:", "Recommended": ":large_orange_circle:", "Optional": ":large_green_circle:", "External": ":white_circle:"}
+_PRIORITY_TAG = {"Mandatory": "M", "Recommended": "R", "Optional": "O"}
 
 
-def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, map_state: dict | None, people: list, by_code: dict, expanded: bool, dm_open: set | None = None) -> list:
-    team_id = team["id"]
-    tag = f"{len(members)} member{'s' if len(members) != 1 else ''}" if members else ("Mandatory" if team["tier"] == "Mandatory" else team["tier"])
-    # Status is just the leading icon now -- no separate "Completed"/"Pending"
-    # text pill, too many stacked labels looked cluttered.
-    check = ":white_check_mark: " if members else ":hourglass_flowing_sand: "
+def _team_is_staffed(team_id: str, members: list) -> bool:
+    """
+    A team counts as staffed once every one of ITS Mandatory-priority
+    catalog roles has both a primary and a backup -- not just "has one
+    member added", which used to let a team with only one of several
+    mandatory roles filled count as done. Falls back to "at least one
+    fully-filled role" for a team with no catalog entry yet.
+    """
+    from .team_catalog_v2 import roles_for_team
 
-    header = {
+    mandatory_roles = {r["role"] for r in roles_for_team(team_id) if r["priority"] == "Mandatory"}
+    filled_roles = {m["role"] for m in members if m.get("primary") and m.get("backup")}
+    if mandatory_roles:
+        return mandatory_roles.issubset(filled_roles)
+    return bool(filled_roles)
+
+
+def _info_fields_block(team: dict) -> list:
+    return [
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*Purpose*\n{team['purpose']}"},
+                {"type": "mrkdwn", "text": f"*Primary IR phases*\n{team['phases']}"},
+                {"type": "mrkdwn", "text": f"*Team type*\n{team['type']}"},
+                {"type": "mrkdwn", "text": f"*Can be outsourced*\n{team['outsource']}"},
+            ],
+        }
+    ]
+
+
+def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list, by_code: dict) -> list:
+    role = role_entry["role"]
+    priority = role_entry["priority"]
+    existing = next((m for m in members if m["role"] == role), None)
+    primary_id = existing["primary"][0] if existing and existing.get("primary") else None
+    backup_id = existing["backup"][0] if existing and existing.get("backup") else None
+
+    if primary_id and backup_id:
+        status = ":white_check_mark: Done"
+    elif primary_id:
+        status = ":large_blue_circle: Primary set — needs a backup"
+    else:
+        status = ":hourglass_flowing_sand: Pending"
+
+    role_header = {
         "type": "section",
-        "text": {"type": "mrkdwn", "text": f"{check}*{team['id']} · {team['name']}*\n{team['tier']}  ·  `{tag}`  ·  `{team['type']}`"},
-        "accessory": {
-            "type": "button",
-            "text": {"type": "plain_text", "text": "Hide" if expanded else "Open", "emoji": True},
-            "action_id": "v2_team_expand_toggle",
-            "value": "__none__" if expanded else team_id,
-        },
+        "text": {"type": "mrkdwn", "text": f"*{role}*\n{status}"},
     }
-    blocks = [header]
+    if primary_id or backup_id:
+        # A labeled button with a confirm dialog instead of an unlabeled
+        # "⋮" overflow menu -- the overflow icon gave no hint it meant
+        # "remove" until clicked, and had no undo-safety net.
+        role_header["accessory"] = {
+            "type": "button",
+            "text": {"type": "plain_text", "text": "✕ Remove", "emoji": True},
+            "action_id": "v2_team_role_remove",
+            "value": f"{team_id}|{role}",
+            "style": "danger",
+            "confirm": {
+                "title": {"type": "plain_text", "text": "Remove this assignment?"},
+                "text": {"type": "mrkdwn", "text": f"This clears Primary and Backup for *{role}*. You'll need to reassign both."},
+                "confirm": {"type": "plain_text", "text": "Remove"},
+                "deny": {"type": "plain_text", "text": "Cancel"},
+            },
+        }
 
-    if not expanded:
+    blocks = [
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": "`ROLE`"}]},
+        role_header,
+    ]
+
+    member_options = [{"text": {"type": "plain_text", "text": p["n"]}, "value": p["i"]} for p in people]
+    if not member_options:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No one in this workspace to assign yet._"}]})
         return blocks
+
+    primary_accessory = {
+        "type": "static_select",
+        "action_id": "v2_team_role_primary_select",
+        "options": member_options,
+        "placeholder": {"type": "plain_text", "text": "Primary member…"},
+    }
+    if primary_id and primary_id in by_code:
+        primary_accessory["initial_option"] = {"text": {"type": "plain_text", "text": by_code[primary_id]["n"]}, "value": primary_id}
+
+    backup_candidates = [p for p in people if p["i"] != primary_id]
+    backup_options = [{"text": {"type": "plain_text", "text": p["n"]}, "value": p["i"]} for p in backup_candidates] or [
+        {"text": {"type": "plain_text", "text": "No one else available"}, "value": "__none__"}
+    ]
+    backup_accessory = {
+        "type": "static_select",
+        "action_id": "v2_team_role_backup_select",
+        "options": backup_options,
+        "placeholder": {"type": "plain_text", "text": "Backup member…"},
+    }
+    if backup_id and backup_id in by_code and backup_id != primary_id:
+        backup_accessory["initial_option"] = {"text": {"type": "plain_text", "text": by_code[backup_id]["n"]}, "value": backup_id}
 
     blocks.append(
         {
-            "type": "section",
-            "block_id": f"teamexpand|{team_id}",
-            "text": {
-                "type": "mrkdwn",
-                "text": (
-                    f"*Purpose*\n{team['purpose']}\n\n"
-                    f"*Primary IR phases*\n{team['phases']}\n\n"
-                    f"*Team type*\n{team['type']}\n\n"
-                    f"*Can be outsourced*\n{team['outsource']}"
-                ),
-            },
+            "type": "actions",
+            "block_id": f"teamrolepick|{team_id}|{role}",
+            "elements": [primary_accessory, backup_accessory],
         }
     )
+    return blocks
 
-    if not members:
-        blocks.append(
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": "_No members yet — add the people who will run this team in a test._"}]}
-        )
-    for i, member in enumerate(members):
-        blocks.extend(_member_block(team_id, i, member, by_code, resp_mapped, dm_open))
+
+def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, map_state: dict | None, people: list, by_code: dict, expanded: bool, dm_open: set | None = None, active_priority: str | None = None) -> list:
+    """Full detail panel for the one team currently selected via the team
+    tab row (build_teams_card only ever calls this for that one team)."""
+    from .team_catalog_v2 import roles_for_team
+
+    team_id = team["id"]
+    is_done = _team_is_staffed(team_id, members)
+    status_text = ":white_check_mark: *Complete*" if is_done else ":hourglass_flowing_sand: *Pending*"
+
+    blocks = [
+        {
+            "type": "section",
+            "block_id": f"teamheader|{team_id}",
+            "text": {"type": "mrkdwn", "text": f"*{team_id} · {team['name']}*\n`{team['tier']}`  ·  `{team['type']}`"},
+        },
+        {"type": "section", "text": {"type": "mrkdwn", "text": status_text}},
+        *_info_fields_block(team),
+    ]
+
+    catalog = roles_for_team(team_id)
+    if catalog:
+        present_priorities = [p for p in ("Mandatory", "Recommended", "Optional") if any(r["priority"] == p for r in catalog)]
+        if active_priority not in present_priorities:
+            active_priority = present_priorities[0] if present_priorities else None
+
+        if len(present_priorities) > 1:
+            blocks.append(
+                {
+                    "type": "actions",
+                    "block_id": f"teampriority|{team_id}|{active_priority or ''}",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": f"{p} roles ({sum(1 for r in catalog if r['priority'] == p)})", "emoji": True},
+                            "action_id": f"v2_team_priority_tab__{team_id}__{p}",
+                            "value": p,
+                            **({"style": "primary"} if p == active_priority else {}),
+                        }
+                        for p in present_priorities
+                    ],
+                }
+            )
+
+        blocks.append({"type": "divider"})
+        for role_entry in [r for r in catalog if r["priority"] == active_priority]:
+            blocks.extend(_role_row_blocks(team_id, role_entry, members, people, by_code))
+            blocks.append({"type": "divider"})
+
+    # Any member not in the catalog (free-typed custom role) -- shown
+    # below the catalog table, same as before.
+    catalog_role_names = {r["role"] for r in catalog}
+    custom_members = [(i, m) for i, m in enumerate(members) if m["role"] not in catalog_role_names]
+    if custom_members:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "*Custom roles*"}]})
+        for i, member in custom_members:
+            blocks.extend(_member_block(team_id, i, member, by_code, resp_mapped, dm_open))
+        blocks.append({"type": "divider"})
+
+    is_adding = add and add.get("team_id") == team_id
+    is_mapping = map_state and map_state.get("team_id") == team_id
+
+    if is_mapping:
+        blocks.extend(_map_flow_blocks(team, members, resp_mapped, map_state, by_code))
+        blocks.append({"type": "divider"})
+    elif is_adding:
+        blocks.extend(_add_flow_blocks(team, add, people, by_code))
+        blocks.append({"type": "divider"})
 
     # Sir's call: for a small company, the same 2-3 people run every team
     # -- once this team's Role/Member/Backup is filled, let the admin copy
@@ -584,7 +752,7 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
                     "elements": [
                         {
                             "type": "button",
-                            "text": {"type": "plain_text", "text": ":twisted_rightwards_arrows: Apply to other teams", "emoji": True},
+                            "text": {"type": "plain_text", "text": ":twisted_rightwards_arrows: Apply same user to other teams", "emoji": True},
                             "action_id": "v2_team_copy_open",
                             "value": team_id,
                         }
@@ -592,18 +760,6 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
                 }
             )
 
-    is_mapping = map_state and map_state.get("team_id") == team_id
-
-    if is_mapping:
-        blocks.extend(_map_flow_blocks(team, members, resp_mapped, map_state, by_code))
-        blocks.append({"type": "divider"})
-    else:
-        # Sir's call: show the Role/Member/Backup form the instant the team
-        # is expanded -- no "+ Assign member" click needed first. If there's
-        # no in-progress pick for this team yet, start from a blank one.
-        effective_add = add if (add and add.get("team_id") == team_id) else {"team_id": team_id, "role": None, "primary": [], "backup": []}
-        blocks.extend(_add_flow_blocks(team, effective_add, people, by_code))
-    blocks.append({"type": "divider"})
     return blocks
 
 
@@ -615,9 +771,10 @@ def build_teams_card(state: dict, people: list) -> dict:
     dm_open = state.get("dm_open", set())
     active_tier = state.get("active_tier") or "Mandatory"
     expanded_team = state.get("expanded_team")
+    active_priority = state.get("active_priority")
     by_code = {p["i"]: p for p in people}
 
-    staffed = sum(1 for tid in MANDATORY_TEAM_IDS if teams.get(tid))
+    staffed = sum(1 for tid in MANDATORY_TEAM_IDS if _team_is_staffed(tid, teams.get(tid, [])))
     total = len(MANDATORY_TEAM_IDS)
     total_members = sum(len(m) for m in teams.values())
     total_mapped = sum(len(r) for r in resp.values())
@@ -650,28 +807,67 @@ def build_teams_card(state: dict, people: list) -> dict:
         },
     ]
 
-    if not ready:
+    blocks.append({"type": "divider"})
+
+    # "Select a category, then a team" -- one tab row per team in the
+    # active tier (instead of a list of rows each with its own Open
+    # button), with only the selected team's full detail shown below.
+    tier_teams = teams_in_tier(active_tier)
+    if not any(t["id"] == expanded_team for t in tier_teams):
+        expanded_team = tier_teams[0]["id"] if tier_teams else None
+
+    if tier_teams:
+        tier_staffed = sum(1 for t in tier_teams if _team_is_staffed(t["id"], teams.get(t["id"], [])))
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": f"*{active_tier} tier:* {tier_staffed} / {len(tier_teams)} staffed"}],
+            }
+        )
+
+        # Jump straight to any team across every tier -- with 35 teams
+        # total, clicking through tabs tier by tier to find one specific
+        # team is slow.
         blocks.append(
             {
                 "type": "actions",
                 "elements": [
                     {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": ":clipboard: Assign all at once", "emoji": True},
-                        "action_id": "v2_team_bulk_assign_open",
-                        "value": "open",
+                        "type": "static_select",
+                        "action_id": "v2_team_jump_select",
+                        "placeholder": {"type": "plain_text", "text": "Jump to a team…"},
+                        "options": [
+                            {"text": {"type": "plain_text", "text": f"{t['id']} · {_short_team_name(t['name'])}"[:75]}, "value": t["id"]}
+                            for t in ALL_TEAMS
+                        ],
                     }
                 ],
             }
         )
 
-    blocks.append({"type": "divider"})
+        team_tab_elements = [
+            {
+                "type": "button",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"{':white_check_mark:' if _team_is_staffed(t['id'], teams.get(t['id'], [])) else ':hourglass_flowing_sand:'} {_short_team_name(t['name'])}"[:75],
+                    "emoji": True,
+                },
+                "action_id": f"v2_team_expand_toggle__{t['id']}",
+                "value": t["id"],
+                **({"style": "primary"} if t["id"] == expanded_team else {}),
+            }
+            for t in tier_teams
+        ]
+        blocks.append({"type": "actions", "block_id": f"teamexpand|{expanded_team or ''}", "elements": team_tab_elements})
+        blocks.append({"type": "divider"})
 
-    for team in teams_in_tier(active_tier):
+    selected_team = next((t for t in tier_teams if t["id"] == expanded_team), None)
+    if selected_team:
         blocks.extend(
             _team_block(
-                team, teams.get(team["id"], []), resp.get(team["id"], []), add, map_state,
-                people, by_code, expanded_team == team["id"], dm_open,
+                selected_team, teams.get(selected_team["id"], []), resp.get(selected_team["id"], []), add, map_state,
+                people, by_code, True, dm_open, active_priority,
             )
         )
 
@@ -683,7 +879,7 @@ def build_teams_card(state: dict, people: list) -> dict:
                     "type": "button",
                     "text": {
                         "type": "plain_text",
-                        "text": "→ Continue — review my threats" if ready else f"Staff all mandatory teams to continue ({staffed}/{total})",
+                        "text": "→ Continue — review my threats" if ready else f"Continue ({staffed}/{total} staffed)",
                         "emoji": True,
                     },
                     "action_id": "v2_teams_done",
@@ -703,3 +899,50 @@ def build_teams_card(state: dict, people: list) -> dict:
     )
 
     return {"blocks": blocks}
+
+
+def build_teams_done_card() -> dict:
+    """Short confirmation shown right after Configure Teams finishes, so
+    the admin knows what's next before the card jumps straight into
+    Threat Profile -- sir's call."""
+    return {
+        "blocks": [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": ":tada: Teams configured", "emoji": True},
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Every mandatory team has its roles staffed — you're ready to move on.",
+                },
+            },
+            {"type": "divider"},
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": ":white_check_mark:  *Configure Teams* — _done_"},
+            },
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": ":arrow_right:  *Threat Profile* — up next"},
+            },
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": ":clipboard:  *Plan* — after that"},
+            },
+            {"type": "divider"},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "→ Continue to Threat Profile", "emoji": True},
+                        "action_id": "v2_teams_confirm_continue",
+                        "value": "next",
+                        "style": "primary",
+                    }
+                ],
+            },
+        ]
+    }

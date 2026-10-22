@@ -28,7 +28,7 @@
             "text": "Home",
             "emoji": true
           },
-          "action_id": "home_tab",
+          "action_id": "home_tab__home",
           "value": "home",
           "style": "primary"
         },
@@ -39,7 +39,7 @@
             "text": "Teams",
             "emoji": true
           },
-          "action_id": "home_tab",
+          "action_id": "home_tab__teams",
           "value": "teams"
         },
         {
@@ -49,7 +49,7 @@
             "text": "Tests",
             "emoji": true
           },
-          "action_id": "home_tab",
+          "action_id": "home_tab__tests",
           "value": "tests"
         },
         {
@@ -59,7 +59,7 @@
             "text": "Report",
             "emoji": true
           },
-          "action_id": "home_tab",
+          "action_id": "home_tab__report",
           "value": "report"
         }
       ]

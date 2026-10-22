@@ -14,6 +14,8 @@ enough for a click-through demo, and avoids building real persistence
 before sir has approved the design at all.
 """
 
+import json
+
 THREATS = [
     {
         "key": "ext", "module": "Cybersecurity", "icon": ":shield:",
@@ -474,9 +476,16 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
 
                             steps = steps_for_phase(plan_id, active_phase) if active_phase else []
                             if steps:
+                                # Every scenario tab renders green now (all of
+                                # them run when this phase is triggered), so
+                                # there's no visual way to tell "selected" from
+                                # "not yet clicked" -- always default to the
+                                # first one so TestMyPlan/Trigger is available
+                                # the moment a phase is picked, not gated on an
+                                # explicit scenario click that no longer shows.
                                 active_scenario = state.get("active_scenario")
                                 if not any(s["scenario"] == active_scenario for s in steps):
-                                    active_scenario = steps[0]["scenario"] if first_visit else None
+                                    active_scenario = steps[0]["scenario"]
 
                                 blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`SCENARIO`"}]})
                                 scenario_tab_elements = [
@@ -485,7 +494,10 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
                                         "text": {"type": "plain_text", "text": s["scenario"], "emoji": True},
                                         "action_id": f"v2_threat_scenario_tab__{plan_id}__{active_phase}__{s['scenario']}",
                                         "value": s["scenario"],
-                                        **({"style": "primary"} if s["scenario"] == active_scenario else {}),
+                                        # All green once a phase is chosen -- Trigger now runs every
+                                        # scenario in the phase, not just whichever one you clicked
+                                        # last, so every scenario tab shows as included.
+                                        "style": "primary",
                                     }
                                     for s in steps
                                 ]
@@ -499,9 +511,20 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
                                             "elements": [
                                                 {
                                                     "type": "button",
-                                                    "text": {"type": "plain_text", "text": ":rotating_light: Trigger", "emoji": True},
+                                                    "text": {"type": "plain_text", "text": ":rotating_light: TestMyPlan", "emoji": True},
                                                     "action_id": "v2_threat_trigger",
-                                                    "value": f"{plan_id}:{active_phase}:{active_scenario}",
+                                                    "value": json.dumps(
+                                                        {
+                                                            "plan_id": plan_id,
+                                                            "phase": active_phase,
+                                                            "scenario": active_scenario,
+                                                            "module": active_module,
+                                                            "crit": active_crit,
+                                                            "threat": active_item["label"],
+                                                            "incident": selected_incident["name"],
+                                                            "cause": selected_cause["name"],
+                                                        }
+                                                    ),
                                                     "style": "danger",
                                                 }
                                             ],

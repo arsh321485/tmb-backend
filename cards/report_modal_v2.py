@@ -40,6 +40,7 @@ def build_modal_view(slack_team_id: str = "") -> dict:
     done = [t for t in tasks if t.status == "done"]
     escalated = [t for t in tasks if t.status == "escalated"]
     pending = [t for t in tasks if t.status == "sent"]
+    unacknowledged = [t for t in tasks if not t.was_acknowledged]
 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": ":bar_chart: Preparedness report", "emoji": True}},
@@ -50,6 +51,7 @@ def build_modal_view(slack_team_id: str = "") -> dict:
                 {"type": "mrkdwn", "text": f"*Responded*\n{len(done)} / {len(tasks)}"},
                 {"type": "mrkdwn", "text": f"*Escalated to backup*\n{len(escalated)}"},
                 {"type": "mrkdwn", "text": f"*Still waiting*\n{len(pending)}"},
+                {"type": "mrkdwn", "text": f"*Paged without acknowledging first*\n{len(unacknowledged)} / {len(tasks)}"},
             ],
         },
         {"type": "divider"},
@@ -58,6 +60,9 @@ def build_modal_view(slack_team_id: str = "") -> dict:
     if not tasks:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "_Nobody was staffed on a team when this drill ran, so nobody was DM'd._"}})
 
+    def _ack_note(t) -> str:
+        return "" if t.was_acknowledged else "\n:warning: _Never acknowledged this role before being paged_"
+
     for t in done:
         elapsed = t.responded_at - t.sent_at
         minutes, seconds = int(elapsed.total_seconds() // 60), int(elapsed.total_seconds() % 60)
@@ -65,7 +70,7 @@ def build_modal_view(slack_team_id: str = "") -> dict:
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f":white_check_mark: *{t.role}* — {t.team_name}{backup_note}\nResponded in {minutes}m {seconds}s"},
+                "text": {"type": "mrkdwn", "text": f":white_check_mark: *{t.role}* — {t.team_name}{backup_note}\nResponded in {minutes}m {seconds}s{_ack_note(t)}"},
             }
         )
 
@@ -73,18 +78,69 @@ def build_modal_view(slack_team_id: str = "") -> dict:
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f":arrows_counterclockwise: *{t.role}* — {t.team_name}\nPrimary didn't respond in time — handed to backup"},
+                "text": {"type": "mrkdwn", "text": f":arrows_counterclockwise: *{t.role}* — {t.team_name}\nPrimary didn't respond in time — handed to backup{_ack_note(t)}"},
             }
         )
 
     for t in pending:
-        waiting = ""
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f":hourglass_flowing_sand: *{t.role}* — {t.team_name}{waiting}\nStill waiting for a response"},
+                "text": {"type": "mrkdwn", "text": f":hourglass_flowing_sand: *{t.role}* — {t.team_name}\nStill waiting for a response{_ack_note(t)}"},
             }
         )
+
+    # Real decisions + scores (sir's TMP_Ransomware_Injects.xlsx flow) --
+    # admin-only: the participant who answered never sees their score or
+    # rating, only this report does.
+    from exercises.models import DecisionResponse
+
+    decisions = list(DecisionResponse.objects(exercise=exercise).order_by("sent_at"))
+    if decisions:
+        answered = [d for d in decisions if d.chosen_option]
+        poor = [d for d in answered if d.rating == "Poor"]
+
+        time_to_first_text = "—"
+        if answered:
+            first_sent = min(d.sent_at for d in decisions)
+            first_answered = min(d.responded_at for d in answered)
+            elapsed = first_answered - first_sent
+            minutes, seconds = int(elapsed.total_seconds() // 60), int(elapsed.total_seconds() % 60)
+            time_to_first_text = f"{minutes}m {seconds}s"
+
+        blocks.append({"type": "divider"})
+        blocks.append({"type": "header", "text": {"type": "plain_text", "text": ":dart: Decisions", "emoji": True}})
+        blocks.append(
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Answered*\n{len(answered)} / {len(decisions)}"},
+                    {"type": "mrkdwn", "text": f"*Time to first decision*\n{time_to_first_text}"},
+                    {"type": "mrkdwn", "text": f"*Rated Poor*\n{len(poor)} / {len(answered)}" if answered else "*Rated Poor*\n—"},
+                ],
+            }
+        )
+
+        rating_emoji = {"Best": ":white_check_mark:", "Acceptable": ":large_blue_circle:", "Partial": ":large_orange_circle:", "Poor": ":red_circle:"}
+        for d in decisions:
+            if d.chosen_option:
+                emoji = rating_emoji.get(d.rating, ":white_circle:")
+                blocks.append(
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"{emoji} *{d.role}* — {d.team_name}\nChose *{d.chosen_option}* · {d.rating} · score {d.score}/10",
+                        },
+                    }
+                )
+            else:
+                blocks.append(
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f":hourglass_flowing_sand: *{d.role}* — {d.team_name}\nDecision not yet answered"},
+                    }
+                )
 
     return {"type": "modal", "callback_id": "v2_report_modal", "title": {"type": "plain_text", "text": "Preparedness report"}, "close": {"type": "plain_text", "text": "Close"}, "blocks": blocks}
 

@@ -133,6 +133,12 @@ class TeamMember(me.Document):
     # [{"responsibility": "...", "action": "Decide", "detail": "..."}]
     mapped_responsibilities = me.ListField(me.DictField(), default=list)
 
+    # {slack_user_id: datetime} -- who has actually confirmed "I understand
+    # my role and I'm ready" via the real Welcome -> Role -> Acknowledge DM
+    # flow (role_welcome_v2.py), keyed per person since primary and backup
+    # each acknowledge independently.
+    acknowledged_by = me.DictField(default=dict)
+
     updated_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
     meta = {"collection": "team_members", "strict": False}
@@ -148,6 +154,7 @@ class ScenarioSelection(me.Document):
     incident_id = me.StringField(required=False)
     cause_id = me.StringField(required=False)
     scenario_id = me.StringField(required=False)
+    phase = me.StringField(required=False)  # which Phase tab was active on Threat Profile when armed
 
     # Step 6 "Arm this test" -- the plan's steps are still a fixed
     # placeholder (real per-scenario content is pending sir's sign-off),

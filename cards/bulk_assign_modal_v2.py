@@ -173,6 +173,7 @@ def handle_submission(payload: dict, bot_token: str) -> None:
             default_resp = default_responsibility_for(tid, role) or ROLE_DEFAULT_RESP.get(role)
             team_assignment_notify_v2.send_team_assignment_dm(
                 team_id_slack, team_name, role, primary, backup, default_resp, by_code, bot_token,
+                catalog_team_id=tid,
             )
 
     try:
