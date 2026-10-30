@@ -14,6 +14,7 @@ from .control_mapping import map_controls
 from .models import ALLOWED_EXTENSIONS, STATUS_FAILED, STATUS_PARSED, Plan
 from .parsing import PlanParsingError, extract_text
 from .gap_review import find_gaps
+from .resilience_map import extract_resilience_map
 from .structured_extraction import extract_structured_fields
 from .versioning import assign_version
 
@@ -36,27 +37,6 @@ def _post_message(channel: str, text: str, bot_token: str) -> None:
 
 def _extension_of(filename: str) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-
-
-def _summarize(structured: dict) -> str:
-    """One-line summary of what pattern-matching found, for the Slack reply."""
-    found = []
-    if structured.get("rto"):
-        found.append(f"RTO: {', '.join(structured['rto'])}")
-    if structured.get("rpo"):
-        found.append(f"RPO: {', '.join(structured['rpo'])}")
-    if structured.get("emails"):
-        found.append(f"{len(structured['emails'])} contact email(s)")
-    if structured.get("sections"):
-        found.append(f"{len(structured['sections'])} section(s)")
-
-    if not found:
-        return (
-            "No RTO/RPO targets, contacts or sections detected automatically -- "
-            "full structured analysis (roles, triggers, escalation paths) "
-            "still needs real NLP, this is pattern-matching only."
-        )
-    return "Found so far: " + "; ".join(found) + "."
 
 
 def handle_dm_message_event(event: dict, team_id: str, bot_token: str) -> None:
@@ -153,6 +133,24 @@ def ingest_one_file(
         plan.gaps = find_gaps(plan.structured_data) + gaps_from_contact_checks(
             plan.contact_checks
         )
+        # Phase 1 (Read) -- the real resilience map (per-service RTO/RPO/
+        # MTPD + dependencies), via NVIDIA. Restricted to whoever's
+        # assigned as the real "Plans & BIA owner" (cards/admins_v2_data.py)
+        # -- if someone else uploads, the old legacy extraction above
+        # still runs (so the file is still saved/parsed), but the real
+        # Phase 1 map is skipped for them; not a failure, so a plan
+        # upload never breaks either way.
+        from cards.persistence_v2 import get_module_owner
+
+        owner_id = get_module_owner(team_id, "plans_bia")
+        is_owner_assigned = bool(owner_id)
+        is_authorized = (not is_owner_assigned) or (owner_id == user_id)
+
+        if is_authorized:
+            resilience_map = extract_resilience_map(plan.extracted_text)
+            if resilience_map:
+                plan.resilience_map = resilience_map
+                plan.resilience_map_status = "proposed"
         plan.status = STATUS_PARSED
     except PlanParsingError as exc:
         plan.status = STATUS_FAILED
@@ -175,25 +173,35 @@ def ingest_one_file(
     )
 
     if plan.status == STATUS_PARSED:
-        word_count = len(plan.extracted_text.split())
-        gap_note = (
-            f" :warning: {len(plan.gaps)} gap(s) found -- run `/testmyplan gaps` for details."
-            if plan.gaps
-            else " :white_check_mark: No gaps found by the automatic checks."
-        )
-        mentioned = plan.control_mapping.get("mentioned") if plan.control_mapping else []
-        control_note = (
-            f" Frameworks referenced: {', '.join(mentioned)}."
-            if mentioned
-            else " No recognized compliance frameworks (ISO 22301, NIST CSF, DORA, etc.) mentioned."
-        )
-        _post_message(
-            channel_id,
-            f":inbox_tray: Got it -- *{filename}* uploaded and parsed "
-            f"(~{word_count} words). {_summarize(plan.structured_data)}"
-            f"{version_note}{gap_note}{control_note}",
-            bot_token,
-        )
+        if is_owner_assigned and not is_authorized:
+            _post_message(
+                channel_id,
+                f":inbox_tray: Got it -- *{filename}* saved.{version_note} "
+                ":lock: Only the assigned *Plans & BIA owner* can generate and confirm "
+                "the resilience map for this workspace -- ask your admin to assign you "
+                "in the Admins card if this should be your job.",
+                bot_token,
+            )
+        elif plan.resilience_map:
+            # The real resilience map card (Phase 1, A10) replaces the
+            # old regex-era summary text below -- it shows the same
+            # "what did we find" information, properly structured and
+            # with a real confirm step, so the old verbose text message
+            # was dropped (sir's call: it was leftover from before this
+            # plan existed and only confused what's actually new).
+            from cards.resilience_map_v2 import send_card
+
+            send_card(plan, channel_id, bot_token)
+        else:
+            # No resilience map -- the NVIDIA call is on a shared/slow
+            # endpoint and sometimes genuinely times out even when the
+            # document is fine (confirmed live: the exact same file
+            # worked moments later on retry). A Retry button costs
+            # nothing when things are healthy and saves a re-upload
+            # when they aren't.
+            from cards.resilience_map_v2 import send_retry_card
+
+            send_retry_card(plan, channel_id, bot_token, version_note)
     else:
         _post_message(
             channel_id,

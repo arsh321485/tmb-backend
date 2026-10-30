@@ -146,12 +146,6 @@ def build_real_test_plan_card(
                     "value": f"{plan_id}:{active_phase}:{active_scenario}",
                     "style": "danger",
                 },
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": ":bar_chart: View full summary", "emoji": True},
-                    "action_id": "v2_plan_view_summary",
-                    "value": json.dumps({"plan_id": plan_id, "phase": active_phase, "scenario": active_scenario, "breadcrumb": breadcrumb or {}}),
-                },
             ],
         }
     )

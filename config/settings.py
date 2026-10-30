@@ -134,6 +134,13 @@ MONGO_DB_NAME = config("MONGO_DB_NAME", default="tmb_backend")
 # because it has a genuinely free tier, unlike the Anthropic/OpenAI APIs.
 GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
 
+# NVIDIA NIM API -- Phase 1 (Read) backend AI: generating structured
+# data (service catalogues, BIA interview follow-ups, resilience map
+# text) from real plan content. Separate from GEMINI_API_KEY above,
+# which is specifically the existing regex-extraction fallback path.
+NVIDIA_API_KEY = config("NVIDIA_API_KEY", default="")
+NVIDIA_MODEL = config("NVIDIA_MODEL", default="nvidia/nemotron-3.5-bolt-e4b")
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

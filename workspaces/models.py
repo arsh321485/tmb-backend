@@ -66,3 +66,16 @@ def get_bot_token(team_id: str) -> str | None:
         return None
     workspace = Workspace.objects(team_id=team_id).first()
     return workspace.bot_token if workspace else None
+
+
+def get_first_admin(team_id: str) -> str:
+    """
+    The person who originally connected the app for this workspace (A4/A5)
+    -- sir's call: there's no separate People & Roles owner role to assign;
+    every Teams & Roles escalation (no backup, decline with no coverage,
+    24h/48h silence, a leaver) goes straight to this person instead.
+    """
+    if not team_id:
+        return ""
+    workspace = Workspace.objects(team_id=team_id).first()
+    return (workspace.installed_by_slack_user_id if workspace else "") or ""

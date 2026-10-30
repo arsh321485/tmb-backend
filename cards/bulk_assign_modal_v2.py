@@ -58,7 +58,7 @@ def build_modal_view(people: list, teams_state: dict, channel_id: str = "", mess
         for team_id in unstaffed_ids:
             team = find_team(team_id)
             blocks.append({"type": "divider"})
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*{team_id} · {team['name']}*"}})
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*{team['name']}*"}})
             blocks.append(
                 {
                     "type": "input",
@@ -186,7 +186,7 @@ def handle_submission(payload: dict, bot_token: str) -> None:
 
     people = get_workspace_people(bot_token)
     state = persistence_v2.load_teams_state(team_id_slack)
-    card = with_nav_bar_v2(build_teams_card(state, people), "teams")
+    card = with_nav_bar_v2(build_teams_card(state, people, slack_team_id=team_id_slack), "teams")
     requests.post(
         f"{SLACK_API_BASE}/chat.update",
         headers={"Authorization": f"Bearer {bot_token}"},

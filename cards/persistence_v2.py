@@ -75,6 +75,19 @@ def save_admins_state(team_id: str, assigned: dict) -> None:
     setup.save()
 
 
+def get_module_owner(team_id: str, module_id: str) -> str:
+    """The real Slack user id assigned to a module (e.g. "plans_bia"),
+    or "" if nobody's been assigned yet. Used to restrict Phase 1's
+    plan upload/confirm/lock to only the assigned Plans & BIA owner."""
+    setup = AdminSetup.objects(team_id=team_id).first()
+    if not setup:
+        return ""
+    owner = (setup.module_admins or {}).get(module_id, "")
+    # "invited:Name|email" means someone was invited by email but isn't
+    # a real Slack member yet -- not a usable Slack user id.
+    return "" if owner.startswith("invited:") else owner
+
+
 def load_scenario_selection(team_id: str, module: str) -> dict:
     sel = ScenarioSelection.objects(team_id=team_id, module=module).first()
     if sel is None:
@@ -125,6 +138,56 @@ def load_acknowledgments(team_id: str) -> dict:
             continue
         for tm in TeamMember.objects(team=team_doc):
             by_role[(slug, tm.role)] = set((tm.acknowledged_by or {}).keys())
+    return by_role
+
+
+def record_dm_status(slack_team_id: str, catalog_team_id: str, role: str, slack_user_id: str, status: str) -> None:
+    """
+    Records whether the real Welcome DM (role_welcome_v2.send_welcome_dm)
+    actually reached this person -- "sent" or "failed", from the real
+    Slack API call's own result -- so Configure Teams can show real
+    delivery status, not just "assigned".
+    """
+    team_doc = Team.objects(team_id=slack_team_id, slug=catalog_team_id).first()
+    if not team_doc:
+        return
+    tm = TeamMember.objects(team=team_doc, role=role).first()
+    if not tm:
+        return
+    tm.dm_status[slack_user_id] = status
+    if status == "sent":
+        import datetime
+
+        tm.dm_sent_at[slack_user_id] = datetime.datetime.utcnow()
+    tm.save()
+
+
+def save_teams_card_location(team_id: str, channel_id: str, message_ts: str) -> None:
+    if not (channel_id and message_ts):
+        return
+    setup = _get_or_create(team_id)
+    setup.teams_card_location = {"channel_id": channel_id, "message_ts": message_ts}
+    setup.save()
+
+
+def load_teams_card_location(team_id: str) -> dict:
+    setup = AdminSetup.objects(team_id=team_id).first()
+    return dict(setup.teams_card_location) if setup and setup.teams_card_location else {}
+
+
+def load_dm_statuses(team_id: str) -> dict:
+    """{(catalog_team_id, role): {slack_user_id: "sent"|"failed", ...}} --
+    same shape/pattern as load_acknowledgments, for Configure Teams to show
+    delivery status per person."""
+    from .team_catalog_v2 import ALL_TEAMS
+
+    by_role = {}
+    for team_doc in Team.objects(team_id=team_id):
+        slug = team_doc.slug
+        if not any(t["id"] == slug for t in ALL_TEAMS):
+            continue
+        for tm in TeamMember.objects(team=team_doc):
+            by_role[(slug, tm.role)] = dict(tm.dm_status or {})
     return by_role
 
 

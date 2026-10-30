@@ -241,6 +241,16 @@ def _member_block(team_id: str, index: int, member: dict, by_code: dict, resp_ma
     text = f":white_check_mark: *{role}*\n{primary_names}  ·  _Notified_"
     if backup_names:
         text += f"\n:arrows_counterclockwise: Backup: {backup_names}"
+    else:
+        text += "\n:warning: No backup named for this role."
+
+    # A primary/backup slack id that's no longer in the workspace
+    # directory has left the company -- by_code silently drops them from
+    # the names above, so without this the row just looks oddly blank
+    # instead of telling the admin why.
+    left_ids = [c for c in member["primary"] + member["backup"] if c not in by_code]
+    if left_ids:
+        text += f"\n:warning: {len(left_ids)} assigned person(s) no longer in the workspace -- reassign."
     row = {
         "type": "section",
         "block_id": f"teammember|{team_id}|{role}|{','.join(member['primary'])}|{','.join(member['backup'])}",
@@ -583,19 +593,26 @@ def _info_fields_block(team: dict) -> list:
             "fields": [
                 {"type": "mrkdwn", "text": f"*Purpose*\n{team['purpose']}"},
                 {"type": "mrkdwn", "text": f"*Primary IR phases*\n{team['phases']}"},
+            ],
+        },
+        {
+            "type": "section",
+            "fields": [
                 {"type": "mrkdwn", "text": f"*Team type*\n{team['type']}"},
                 {"type": "mrkdwn", "text": f"*Can be outsourced*\n{team['outsource']}"},
             ],
-        }
+        },
     ]
 
 
-def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list, by_code: dict) -> list:
+def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list, by_code: dict, dm_statuses: dict | None = None, acknowledged: set | None = None) -> list:
     role = role_entry["role"]
     priority = role_entry["priority"]
     existing = next((m for m in members if m["role"] == role), None)
     primary_id = existing["primary"][0] if existing and existing.get("primary") else None
     backup_id = existing["backup"][0] if existing and existing.get("backup") else None
+    dm_statuses = dm_statuses or {}
+    acknowledged = acknowledged or set()
 
     if primary_id and backup_id:
         status = ":white_check_mark: Done"
@@ -604,32 +621,47 @@ def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list
     else:
         status = ":hourglass_flowing_sand: Pending"
 
+    # Real delivery + acknowledgment status for whoever's assigned --
+    # acknowledged (they opened the card and confirmed) takes priority
+    # over just "sent" (it reached them but they may not have read it).
+    def _dm_tag(uid, label):
+        if not uid:
+            return ""
+        if uid in acknowledged:
+            return f"*{label}*  :white_check_mark: Acknowledged"
+        dm_status = dm_statuses.get(uid)
+        if dm_status == "sent":
+            return f"*{label}*  :incoming_envelope: Card sent"
+        if dm_status == "failed":
+            return f"*{label}*  :warning: Failed to send"
+        return ""
+
+    dm_tags = [t for t in (_dm_tag(primary_id, "Primary"), _dm_tag(backup_id, "Backup")) if t]
+
     role_header = {
         "type": "section",
-        "text": {"type": "mrkdwn", "text": f"*{role}*\n{status}"},
+        "text": {"type": "mrkdwn", "text": f"*{role}*   {status}"},
     }
-    if primary_id or backup_id:
-        # A labeled button with a confirm dialog instead of an unlabeled
-        # "⋮" overflow menu -- the overflow icon gave no hint it meant
-        # "remove" until clicked, and had no undo-safety net.
-        role_header["accessory"] = {
-            "type": "button",
-            "text": {"type": "plain_text", "text": "✕ Remove", "emoji": True},
-            "action_id": "v2_team_role_remove",
-            "value": f"{team_id}|{role}",
-            "style": "danger",
-            "confirm": {
-                "title": {"type": "plain_text", "text": "Remove this assignment?"},
-                "text": {"type": "mrkdwn", "text": f"This clears Primary and Backup for *{role}*. You'll need to reassign both."},
-                "confirm": {"type": "plain_text", "text": "Remove"},
-                "deny": {"type": "plain_text", "text": "Cancel"},
-            },
-        }
 
     blocks = [
         {"type": "context", "elements": [{"type": "mrkdwn", "text": "`ROLE`"}]},
         role_header,
     ]
+    if dm_tags:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "    ".join(dm_tags)}})
+
+    from .role_activities_v2 import activities_for_role
+
+    activities = activities_for_role(team_id, role)
+    if activities:
+        responsibility = activities[0].get("responsibility", "")
+        if responsibility:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Responsibility*\n{responsibility}"}})
+        lines = [f"• *{a['activity']}* — {a['phase']}" for a in activities]
+        for chunk_start in range(0, len(lines), 8):
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines[chunk_start:chunk_start + 8])}})
+    else:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "_No catalog activities on file for this role._"}})
 
     member_options = [{"text": {"type": "plain_text", "text": p["n"]}, "value": p["i"]} for p in people]
     if not member_options:
@@ -658,17 +690,35 @@ def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list
     if backup_id and backup_id in by_code and backup_id != primary_id:
         backup_accessory["initial_option"] = {"text": {"type": "plain_text", "text": by_code[backup_id]["n"]}, "value": backup_id}
 
+    pick_elements = [primary_accessory, backup_accessory]
+    if primary_id or backup_id:
+        pick_elements.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "✕ Remove", "emoji": True},
+                "action_id": "v2_team_role_remove",
+                "value": f"{team_id}|{role}",
+                "style": "danger",
+                "confirm": {
+                    "title": {"type": "plain_text", "text": "Remove this assignment?"},
+                    "text": {"type": "mrkdwn", "text": f"This clears Primary and Backup for *{role}*. You'll need to reassign both."},
+                    "confirm": {"type": "plain_text", "text": "Remove"},
+                    "deny": {"type": "plain_text", "text": "Cancel"},
+                },
+            }
+        )
+
     blocks.append(
         {
             "type": "actions",
             "block_id": f"teamrolepick|{team_id}|{role}",
-            "elements": [primary_accessory, backup_accessory],
+            "elements": pick_elements,
         }
     )
     return blocks
 
 
-def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, map_state: dict | None, people: list, by_code: dict, expanded: bool, dm_open: set | None = None, active_priority: str | None = None) -> list:
+def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, map_state: dict | None, people: list, by_code: dict, expanded: bool, dm_open: set | None = None, active_priority: str | None = None, dm_statuses_by_role: dict | None = None, acknowledgments: dict | None = None) -> list:
     """Full detail panel for the one team currently selected via the team
     tab row (build_teams_card only ever calls this for that one team)."""
     from .team_catalog_v2 import roles_for_team
@@ -681,7 +731,7 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
         {
             "type": "section",
             "block_id": f"teamheader|{team_id}",
-            "text": {"type": "mrkdwn", "text": f"*{team_id} · {team['name']}*\n`{team['tier']}`  ·  `{team['type']}`"},
+            "text": {"type": "mrkdwn", "text": f"*{team['name']}*\n`{team['tier']}`  ·  `{team['type']}`"},
         },
         {"type": "section", "text": {"type": "mrkdwn", "text": status_text}},
         *_info_fields_block(team),
@@ -712,8 +762,12 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
             )
 
         blocks.append({"type": "divider"})
+        dm_statuses_by_role = dm_statuses_by_role or {}
+        acknowledgments = acknowledgments or {}
         for role_entry in [r for r in catalog if r["priority"] == active_priority]:
-            blocks.extend(_role_row_blocks(team_id, role_entry, members, people, by_code))
+            role_dm_statuses = dm_statuses_by_role.get((team_id, role_entry["role"]), {})
+            acked = acknowledgments.get((team_id, role_entry["role"]), set())
+            blocks.extend(_role_row_blocks(team_id, role_entry, members, people, by_code, role_dm_statuses, acked))
             blocks.append({"type": "divider"})
 
     # Any member not in the catalog (free-typed custom role) -- shown
@@ -763,7 +817,7 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
     return blocks
 
 
-def build_teams_card(state: dict, people: list) -> dict:
+def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict:
     teams = state.get("teams", {})
     resp = state.get("resp", {})
     add = state.get("add")
@@ -791,6 +845,23 @@ def build_teams_card(state: dict, people: list) -> dict:
             },
         },
         {"type": "section", "text": {"type": "mrkdwn", "text": ":white_check_mark: *Complete*   ·   :hourglass_flowing_sand: *Pending*"}},
+    ]
+
+    if slack_team_id:
+        from plans.resilience_gaps import suggested_teams_and_roles
+
+        suggestions = suggested_teams_and_roles(slack_team_id)
+        if suggestions["teams"] or suggestions["roles"]:
+            lines = [":bulb: *Suggested from your plan* -- add these yourself wherever they fit; nothing here is added automatically."]
+            if suggestions["teams"]:
+                lines.append("*Teams named in the plan:* " + ", ".join(suggestions["teams"]))
+            if suggestions["roles"]:
+                role_bits = [f"{r['title']}" + ("" if r["has_backup"] else " _(no backup in the plan)_") for r in suggestions["roles"]]
+                lines.append("*Roles named in the plan:* " + ", ".join(role_bits))
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}})
+            blocks.append({"type": "divider"})
+
+    blocks.extend([
         {
             "type": "actions",
             "block_id": f"teamtier|{active_tier}",
@@ -805,7 +876,7 @@ def build_teams_card(state: dict, people: list) -> dict:
                 for tier in TIERS
             ],
         },
-    ]
+    ])
 
     blocks.append({"type": "divider"})
 
@@ -837,7 +908,7 @@ def build_teams_card(state: dict, people: list) -> dict:
                         "action_id": "v2_team_jump_select",
                         "placeholder": {"type": "plain_text", "text": "Jump to a team…"},
                         "options": [
-                            {"text": {"type": "plain_text", "text": f"{t['id']} · {_short_team_name(t['name'])}"[:75]}, "value": t["id"]}
+                            {"text": {"type": "plain_text", "text": _short_team_name(t["name"])[:75]}, "value": t["id"]}
                             for t in ALL_TEAMS
                         ],
                     }
@@ -864,10 +935,14 @@ def build_teams_card(state: dict, people: list) -> dict:
 
     selected_team = next((t for t in tier_teams if t["id"] == expanded_team), None)
     if selected_team:
+        from . import persistence_v2
+
+        dm_statuses_by_role = persistence_v2.load_dm_statuses(slack_team_id) if slack_team_id else {}
+        acknowledgments = persistence_v2.load_acknowledgments(slack_team_id) if slack_team_id else {}
         blocks.extend(
             _team_block(
                 selected_team, teams.get(selected_team["id"], []), resp.get(selected_team["id"], []), add, map_state,
-                people, by_code, True, dm_open, active_priority,
+                people, by_code, True, dm_open, active_priority, dm_statuses_by_role, acknowledgments,
             )
         )
 
@@ -921,7 +996,7 @@ def build_teams_done_card() -> dict:
             {"type": "divider"},
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": ":white_check_mark:  *Configure Teams* — _done_"},
+                "text": {"type": "mrkdwn", "text": ":white_check_mark:  *Teams* — _done_"},
             },
             {
                 "type": "section",

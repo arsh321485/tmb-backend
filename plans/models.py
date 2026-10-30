@@ -53,6 +53,26 @@ class Plan(me.Document):
     # {"mentioned": [...], "not_mentioned": [...]} -- see plans/control_mapping.py (B9).
     control_mapping = me.DictField(required=False)
 
+    # Phase 1 (Read) -- real resilience map + recovery-objectives register
+    # from the NVIDIA model: {"services": [{"name", "rto", "rpo",
+    # "dependencies": [...], "source": "<quoted sentence>"}]}. "approved"
+    # once the Plans & BIA owner confirms it (A10-A12); "proposed" until
+    # then. See plans/resilience_map.py.
+    resilience_map = me.DictField(required=False)
+    resilience_map_status = me.StringField(required=False, default="")
+
+    # A11 -- which flagged gaps (plans/resilience_gaps.py) the Plans &
+    # BIA owner has accepted/acknowledged. Stored as the gap's own
+    # "<service>|<issue>" text so it's stable even if the map is
+    # re-extracted later.
+    accepted_gaps = me.ListField(me.StringField(), default=list)
+
+    # A12 -- final lock on the recovery-objectives register, separate
+    # from resilience_map_status (A10): the map can be "approved" while
+    # gaps are still outstanding, but the objectives register can't lock
+    # until every gap found in A11 has been accepted.
+    objectives_register_status = me.StringField(required=False, default="")
+
     created_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
     meta = {"collection": "plans", "ordering": ["-created_at"]}

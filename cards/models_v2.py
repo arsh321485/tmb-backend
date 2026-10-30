@@ -48,6 +48,18 @@ class AdminSetup(me.Document):
     # reached, but not on a repeat visit (then the admin picks fresh).
     threat_profile_visited_combos = me.ListField(me.StringField(), default=list)
 
+    # Where the Configure Teams card is currently sitting in Slack
+    # ({"channel_id": ..., "message_ts": ...}) -- captured every time it's
+    # (re)drawn, so a real-time event elsewhere (someone acknowledging
+    # their role) can push a fresh update to it without the admin having
+    # to click anything to refresh.
+    teams_card_location = me.DictField(default=dict)
+
+    # The real dedicated "testmyplan-threats-center" channel -- created
+    # once per workspace the first time /testmyplan threats runs, reused
+    # after that instead of creating a new channel every time.
+    threats_center_channel_id = me.StringField(required=False)
+
     updated_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
     meta = {"collection": "admin_setups", "strict": False}
@@ -138,6 +150,33 @@ class TeamMember(me.Document):
     # flow (role_welcome_v2.py), keyed per person since primary and backup
     # each acknowledge independently.
     acknowledged_by = me.DictField(default=dict)
+
+    # {slack_user_id: datetime} -- who clicked "I can't cover this role"
+    # (role_welcome_v2.py's v2_role_decline) instead of acknowledging.
+    # When the primary declines, their backup(s) get notified and
+    # activated automatically.
+    declined_by = me.DictField(default=dict)
+
+    # {slack_user_id: "sent" | "failed"} -- whether the real Welcome DM
+    # (role_welcome_v2.send_welcome_dm) actually went out when this person
+    # was assigned, set from the real Slack API call's own result. Not in
+    # the dict yet = DM hasn't been attempted (e.g. assignment predates
+    # this field).
+    dm_status = me.DictField(default=dict)
+
+    # {slack_user_id: datetime} -- when the Welcome DM actually went out,
+    # so the 24h/48h reminder check knows how long someone's been silent.
+    dm_sent_at = me.DictField(default=dict)
+
+    # {slack_user_id: ["24", "48"]} -- which reminder stages have already
+    # been sent to this person, so the recurring check never re-sends the
+    # same stage twice.
+    reminders_sent = me.DictField(default=dict)
+
+    # [slack_user_id, ...] -- who's already been reported to the People &
+    # Roles owner as "left the workspace" for this role, so the recurring
+    # leaver check never sends the same alert twice for the same person.
+    leaver_notified = me.ListField(me.StringField(), default=list)
 
     updated_at = me.DateTimeField(default=datetime.datetime.utcnow)
 

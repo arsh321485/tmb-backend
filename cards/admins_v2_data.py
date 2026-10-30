@@ -9,6 +9,15 @@ same as before) -- but "who" is now a real workspace member
 MODULE_ADMINS = [
     {"id": "cyber", "m": "Cybersecurity", "note": "Owns the threat map, IR drills and containment scoring"},
     {"id": "privacy", "m": "Privacy", "note": "Owns the 72-hour clock and regulator evidence"},
+    # Phase 1 (Read) -- A8/A9. Only this assigned person can upload the
+    # real plan document and confirm/lock what the AI extracts from it
+    # (enforced in plans/intake.py and cards/interactivity.py's resmap_*
+    # handlers), matching the proposal's "Plans & BIA owner" role.
+    {"id": "plans_bia", "m": "Plans & BIA", "note": "Owns uploading the real plan and confirming the resilience map"},
+    # A13-A17 -- no separate module/owner for this: sir's call. Teams &
+    # Roles coverage alerts (no backup, decline with no coverage, 24h/48h
+    # silence, a leaver) go straight to the workspace's first admin
+    # (workspaces.models.get_first_admin) instead of a 4th assignable role.
 ]
 
 

@@ -34,12 +34,36 @@ from plans.models import Plan
 from plans.scenario_mapping import map_plan_coverage
 from workspaces.models import get_bot_token
 
-SUPPORTED_SUBCOMMANDS = ["run", "status", "gaps", "plans", "pause", "abort"]
+SUPPORTED_SUBCOMMANDS = ["run", "status", "gaps", "plans", "pause", "abort", "threats"]
 
 
 def _ephemeral(text):
     """Only the person who typed the command sees this."""
     return {"response_type": "ephemeral", "text": text}
+
+
+def handle_threats(args, user_id, channel_id, team_id):
+    """Opens the standalone TestMyPlan Threats Center -- its own real
+    Slack channel (#testmyplan-threats-center), created once per
+    workspace and reused after that, separate from the Welcome -> ... ->
+    Trigger nav flow which lives in DMs/other channels."""
+    from cards.threats_center_v2 import build_threats_center_card, get_or_create_channel
+
+    bot_token = get_bot_token(team_id)
+    target_channel_id = get_or_create_channel(team_id, user_id, bot_token)
+    if not target_channel_id:
+        return _ephemeral(":warning: Couldn't create or find the #testmyplan-threats-center channel. Check the bot has the `channels:manage` scope.")
+
+    card = build_threats_center_card({"active_module": None, "active_crit": None, "active_threat": None, "fixed": {}})
+    import requests as http
+
+    http.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={"Authorization": f"Bearer {bot_token}"},
+        json={"channel": target_channel_id, "text": "TestMyPlan Threats Center", **card},
+        timeout=10,
+    )
+    return _ephemeral(f"Posted in <#{target_channel_id}>.")
 
 
 def _active_exercise_for(user_id, team_id):
@@ -198,6 +222,7 @@ _HANDLERS = {
     "plans": handle_plans,
     "pause": handle_pause,
     "abort": handle_abort,
+    "threats": handle_threats,
 }
 
 

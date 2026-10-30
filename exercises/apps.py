@@ -33,6 +33,7 @@ class ExercisesConfig(AppConfig):
             # the Mongo connection) has finished setting up.
             from .drill import escalate_overdue_tasks, fire_due_scheduled_exercises
             from cards.inject_drill_v2 import escalate_overdue_decisions
+            from cards.role_reminders_v2 import check_role_reminders, check_leavers
 
             while True:
                 time.sleep(CHECK_INTERVAL_SECONDS)
@@ -56,5 +57,19 @@ class ExercisesConfig(AppConfig):
                         logger.info("Escalated/timed out %d overdue decision(s)", decisions_count)
                 except Exception:
                     logger.exception("Decision escalation check failed")
+
+                try:
+                    reminders_count = check_role_reminders()
+                    if reminders_count:
+                        logger.info("Sent %d role reminder/escalation message(s)", reminders_count)
+                except Exception:
+                    logger.exception("Role reminder check failed")
+
+                try:
+                    leaver_count = check_leavers()
+                    if leaver_count:
+                        logger.info("Sent %d leaver alert(s) to People & Roles owner", leaver_count)
+                except Exception:
+                    logger.exception("Leaver check failed")
 
         threading.Thread(target=_loop, daemon=True, name="drill-escalation-checker").start()

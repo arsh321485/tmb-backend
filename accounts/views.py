@@ -285,6 +285,21 @@ def _finish_new_workspace_onboarding(team_id: str, authed_user_id: str, bot_toke
     if general_id:
         post_general_announcement(general_id, bot_token)
 
+    # #testmyplan-threats-center -- same pattern as the 3 channels above:
+    # created once here so it's just sitting in the sidebar like the
+    # others, not something the admin has to summon with a slash command.
+    from cards.threats_center_v2 import build_threats_center_card, get_or_create_channel
+
+    threats_center_channel_id = get_or_create_channel(team_id, authed_user_id, bot_token)
+    if threats_center_channel_id:
+        card = build_threats_center_card({"active_module": None, "active_crit": None, "active_threat": None, "fixed": {}})
+        requests.post(
+            f"{SLACK_TOKEN_URL.rsplit('/', 1)[0]}/chat.postMessage",
+            headers={"Authorization": f"Bearer {bot_token}"},
+            json={"channel": threats_center_channel_id, "text": "TestMyPlan Threats Center", **card},
+            timeout=10,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Microsoft Teams (Azure AD) OAuth

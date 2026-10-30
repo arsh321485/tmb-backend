@@ -109,9 +109,11 @@ def _redraw_admins(response_url: str, bot_token: str, current_user_id: str, stat
     _replace_message(response_url, with_nav_bar_v2(build_admins_card(state, people, current_user_id), "admins"))
 
 
-def _redraw_teams(response_url: str, bot_token: str, state: dict) -> None:
+def _redraw_teams(response_url: str, bot_token: str, state: dict, slack_team_id: str = "", channel_id: str = "", message_ts: str = "") -> None:
     people = get_workspace_people(bot_token)
-    _replace_message(response_url, with_nav_bar_v2(build_teams_card(state, people), "teams"))
+    _replace_message(response_url, with_nav_bar_v2(build_teams_card(state, people, slack_team_id=slack_team_id), "teams"))
+    if slack_team_id and channel_id and message_ts:
+        persistence_v2.save_teams_card_location(slack_team_id, channel_id, message_ts)
 
 
 def _redraw_map(response_url: str, module: str, expanded_threat: str = "", expanded_incident: str = "") -> None:
@@ -130,6 +132,66 @@ def handle_block_action_v2(payload: dict) -> None:
     slack_team_id = payload.get("team", {}).get("id", "")
     current_user_id = payload.get("user", {}).get("id", "")
     bot_token = get_bot_token(slack_team_id)
+    top_channel_id = payload.get("channel", {}).get("id", "")
+    top_message_ts = payload.get("message", {}).get("ts", "")
+
+    if action_id.startswith("v2_tc_module_tab__") or action_id.startswith("v2_tc_crit_tab__") or action_id.startswith("v2_tc_threat_tab__"):
+        from .threats_center_v2 import build_threats_center_card, read_current_state as read_tc_state
+
+        state = read_tc_state(message_blocks)
+        if action_id.startswith("v2_tc_module_tab__"):
+            state["active_module"] = action_id.removeprefix("v2_tc_module_tab__")
+            state["active_crit"] = None
+            state["active_threat"] = None
+        elif action_id.startswith("v2_tc_crit_tab__"):
+            state["active_crit"] = action.get("value", "")
+            state["active_threat"] = None
+        else:
+            state["active_threat"] = action.get("value", "")
+        if response_url:
+            _replace_message(response_url, build_threats_center_card(state))
+        return
+
+    if action_id == "v2_tc_launch":
+        from . import org_setup_v2
+        from .threats_v2_data import build_org_threats_card
+
+        value = action.get("value", "")
+        active_module, active_crit, active_threat = (value.split("|", 2) + ["", "", ""])[:3]
+        nav = {
+            "active_module": active_module or None, "active_crit": active_crit or None,
+            "active_threat": active_threat or None, "active_incident": None, "active_cause": None,
+            "active_phase": None, "active_scenario": None,
+        }
+        if slack_team_id:
+            persistence_v2.save_threat_profile_nav(slack_team_id, nav)
+        profile = org_setup_v2.load_profile(slack_team_id) if slack_team_id else None
+        state = {"fixed": {}, "custom": [], "form": None, **nav}
+        threat_profile_card = with_nav_bar_v2(build_org_threats_card(state, profile), "org_threats")
+
+        # Launch Test hands off INTO Command Center -- it does not turn
+        # this Threats Center channel into a copy of Command Center.
+        # Previously this replaced the Threats Center message in place
+        # with the full nav-bar'd card, which dragged the entire
+        # Welcome/Admins/Teams/.../Trigger flow into the wrong channel.
+        from workspaces.models import Workspace
+
+        workspace = Workspace.objects(team_id=slack_team_id).first() if slack_team_id else None
+        command_center_channel_id = workspace.new_design_preview_channel_id if workspace else ""
+        if command_center_channel_id and bot_token:
+            requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                json={"channel": command_center_channel_id, "text": "Threat Profile", **threat_profile_card},
+                timeout=10,
+            )
+        if response_url:
+            link = f"<#{command_center_channel_id}>" if command_center_channel_id else "Command Center"
+            _replace_message(
+                response_url,
+                {"blocks": message_blocks + [{"type": "context", "elements": [{"type": "mrkdwn", "text": f":white_check_mark: Sent to {link} -- continue there to pick Incident/Cause/Phase/Scenario and trigger."}]}]},
+            )
+        return
 
     if action_id == "v2_test_join_exercise":
         if response_url:
@@ -429,6 +491,13 @@ def handle_block_action_v2(payload: dict) -> None:
         state["assigned"][mod_id] = current_user_id
         state["expanded"] = None
         persistence_v2.save_admins_state(slack_team_id, state["assigned"])
+        if mod_id == "plans_bia":
+            # Unlike the other modules' plain "you're admin" line, this
+            # is a real job card with next steps -- worth sending even
+            # when you assign it to yourself, not just when delegating
+            # to someone else (confirmed live: self-assigning showed no
+            # card at all before this).
+            admin_notify_v2.send_admin_assigned_dm(slack_team_id, mod_id, current_user_id, bot_token)
         _redraw_admins(response_url, bot_token, current_user_id, state)
         return
 
@@ -482,11 +551,11 @@ def handle_block_action_v2(payload: dict) -> None:
 
     # "Continue — set up response teams" -- advances to Step 3.
     if action_id == "v2_admins_done":
-        _redraw_teams(response_url, bot_token, persistence_v2.load_teams_state(slack_team_id))
+        _redraw_teams(response_url, bot_token, persistence_v2.load_teams_state(slack_team_id), slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_nav_jump__teams":
-        _redraw_teams(response_url, bot_token, persistence_v2.load_teams_state(slack_team_id))
+        _redraw_teams(response_url, bot_token, persistence_v2.load_teams_state(slack_team_id), slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_team_priority_tab__"):
@@ -496,7 +565,7 @@ def handle_block_action_v2(payload: dict) -> None:
         _, team_id, priority = action_id.split("__", 2)
         state["expanded_team"] = team_id
         state["active_priority"] = priority
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     # The real Welcome -> Role -> Acknowledge DM flow (role_welcome_v2.py,
@@ -504,7 +573,7 @@ def handle_block_action_v2(payload: dict) -> None:
     # PERSON in their own DM, not an admin in the command-center channel,
     # so these update that DM message directly via channel/ts rather than
     # the usual response_url.
-    if action_id in ("v2_role_view", "v2_role_acknowledge", "v2_role_ack_confirm"):
+    if action_id in ("v2_role_view", "v2_role_acknowledge", "v2_role_ack_confirm", "v2_role_decline"):
         from . import role_welcome_v2
         from .models_v2 import Team, TeamMember
         from .team_catalog_v2 import find_team
@@ -535,6 +604,31 @@ def handle_block_action_v2(payload: dict) -> None:
             recipient_name = by_code.get(current_user_id, {}).get("n", "there")
             card = role_welcome_v2.build_ack_card(recipient_name, team_name, role, value)
 
+        elif action_id == "v2_role_decline":
+            import datetime
+
+            now = datetime.datetime.utcnow()
+            backup_notified = False
+            if member:
+                member.declined_by[current_user_id] = now
+                member.save()
+
+                # Only activate a backup when the PRIMARY declines -- a
+                # backup declining has nobody further to fall back to.
+                backup_ids = []
+                if not is_backup:
+                    backup_ids = [uid for uid in member.backup_slack_user_ids if uid != current_user_id]
+                    if backup_ids:
+                        backup_notified = role_welcome_v2.send_backup_activation_dm(backup_ids[0], catalog_team_id, team_name, role, bot_token)
+
+                # Nobody left to cover this role -- either the backup
+                # declined, or the primary declined with no backup on
+                # file. Alert the People & Roles owner instead of letting
+                # the gap go unnoticed.
+                if not backup_notified:
+                    role_welcome_v2.notify_module_owner_no_coverage(slack_team_id, team_name, role, current_user_id, bot_token)
+            card = role_welcome_v2.build_decline_done_card(team_name, role, backup_notified)
+
         else:  # v2_role_ack_confirm
             import datetime
 
@@ -543,6 +637,21 @@ def handle_block_action_v2(payload: dict) -> None:
                 member.acknowledged_by[current_user_id] = now
                 member.save()
             card = role_welcome_v2.build_ack_done_card(now.strftime("%d %b %Y, %H:%M UTC"))
+
+            # Push the acknowledgment straight to the admin's open
+            # Configure Teams card in real time -- sir's call: status
+            # shouldn't need the admin to re-open/refresh to see it.
+            location = persistence_v2.load_teams_card_location(slack_team_id)
+            if location.get("channel_id") and location.get("message_ts"):
+                people = get_workspace_people(bot_token)
+                teams_state = persistence_v2.load_teams_state(slack_team_id)
+                fresh_card = with_nav_bar_v2(build_teams_card(teams_state, people, slack_team_id=slack_team_id), "teams")
+                requests.post(
+                    "https://slack.com/api/chat.update",
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                    json={"channel": location["channel_id"], "ts": location["message_ts"], **fresh_card},
+                    timeout=10,
+                )
 
         requests.post(
             "https://slack.com/api/chat.update",
@@ -566,7 +675,7 @@ def handle_block_action_v2(payload: dict) -> None:
         saved = persistence_v2.load_teams_state(slack_team_id)
         state["teams"], state["resp"] = saved["teams"], saved["resp"]
         state["expanded_team"] = team_id
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id in ("v2_team_role_primary_select", "v2_team_role_backup_select"):
@@ -631,13 +740,13 @@ def handle_block_action_v2(payload: dict) -> None:
         state = read_teams_state(message_blocks)
         state["teams"], state["resp"] = teams, resp
         state["expanded_team"] = team_id
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_team_add_open":
         state = read_teams_state(message_blocks)
         state["add"] = {"team_id": action.get("value", ""), "role": None, "primary": [], "backup": []}
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_team_bulk_assign_open":
@@ -679,7 +788,7 @@ def handle_block_action_v2(payload: dict) -> None:
 
         add["role"] = selected
         state["add"] = add
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_team_member_select":
@@ -690,7 +799,7 @@ def handle_block_action_v2(payload: dict) -> None:
         # A person just made the member can't also still be their own backup.
         add["backup"] = [c for c in add.get("backup", []) if c != selected]
         state["add"] = add
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_team_backup_select":
@@ -699,7 +808,7 @@ def handle_block_action_v2(payload: dict) -> None:
         add = state.get("add") or {}
         add["backup"] = [selected] if selected and selected != "__none__" else []
         state["add"] = add
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_team_role_confirm":
@@ -751,7 +860,7 @@ def handle_block_action_v2(payload: dict) -> None:
             )
         # If required fields are missing, leave the form open as-is
         # rather than silently discarding what's already picked.
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_team_copy_open":
@@ -768,7 +877,7 @@ def handle_block_action_v2(payload: dict) -> None:
     if action_id == "v2_team_add_cancel":
         state = read_teams_state(message_blocks)
         state["add"] = None
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_team_member_overflow":
@@ -795,7 +904,7 @@ def handle_block_action_v2(payload: dict) -> None:
                 state["dm_open"].discard(dm_key)
             else:
                 state["dm_open"].add(dm_key)
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_team_map_responsibilities":
@@ -810,7 +919,7 @@ def handle_block_action_v2(payload: dict) -> None:
             "team_id": action.get("value", ""), "text": None, "who": None,
             "action": None, "detail": None, "phase": "Containment",
         }
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_resp_text_select":
@@ -822,7 +931,7 @@ def handle_block_action_v2(payload: dict) -> None:
         map_state = state.get("map") or {}
         map_state["text"] = selected
         state["map"] = map_state
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_resp_who_toggle__"):
@@ -830,7 +939,7 @@ def handle_block_action_v2(payload: dict) -> None:
         map_state = state.get("map") or {}
         map_state["who"] = action.get("value", "")
         state["map"] = map_state
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_resp_action_pick__"):
@@ -841,7 +950,7 @@ def handle_block_action_v2(payload: dict) -> None:
         map_state["action"] = action.get("value", "")
         map_state["detail"] = None
         state["map"] = map_state
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_resp_detail_select":
@@ -853,7 +962,7 @@ def handle_block_action_v2(payload: dict) -> None:
         map_state = state.get("map") or {}
         map_state["detail"] = selected
         state["map"] = map_state
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_resp_phase_pick__"):
@@ -861,7 +970,7 @@ def handle_block_action_v2(payload: dict) -> None:
         map_state = state.get("map") or {}
         map_state["phase"] = action.get("value", "")
         state["map"] = map_state
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_resp_map_confirm":
@@ -883,13 +992,13 @@ def handle_block_action_v2(payload: dict) -> None:
             # the mockup's own reset-after-add behavior.
             state["map"] = {"team_id": team_id, "text": None, "who": None, "action": None, "detail": None, "phase": "Containment"}
             persistence_v2.save_teams_state(slack_team_id, state["teams"], state["resp"])
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_resp_map_done":
         state = read_teams_state(message_blocks)
         state["map"] = None
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_resp_map_remove":
@@ -904,7 +1013,7 @@ def handle_block_action_v2(payload: dict) -> None:
             persistence_v2.save_teams_state(slack_team_id, state["teams"], state["resp"])
         except (ValueError, IndexError, KeyError):
             pass
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     # Tier tab switch (Mandatory/Recommended/Optional/External).
@@ -920,7 +1029,7 @@ def handle_block_action_v2(payload: dict) -> None:
         state = {**message_state, "teams": saved["teams"], "resp": saved["resp"]}
         state["active_tier"] = action.get("value", "Mandatory")
         state["expanded_team"] = None
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     # Select a team from the team-tab row (each team's button needs its
@@ -936,7 +1045,7 @@ def handle_block_action_v2(payload: dict) -> None:
         state = {**message_state, "teams": saved["teams"], "resp": saved["resp"]}
         value = action.get("value", "")
         state["expanded_team"] = None if value == "__none__" else (value or None)
-        _redraw_teams(response_url, bot_token, state)
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     # "Jump to a team…" -- finds that team's own tier and switches
@@ -953,7 +1062,7 @@ def handle_block_action_v2(payload: dict) -> None:
             state = {**message_state, "teams": saved["teams"], "resp": saved["resp"]}
             state["active_tier"] = target_team["tier"]
             state["expanded_team"] = target_id
-            _redraw_teams(response_url, bot_token, state)
+            _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
     # "Teams ready" -- shows a short confirmation before advancing, so the
@@ -1235,6 +1344,59 @@ def handle_block_action_v2(payload: dict) -> None:
         bot_token = get_bot_token(slack_team_id)
         if trigger_id and bot_token:
             report_modal_v2.open_modal(trigger_id, bot_token, slack_team_id)
+        return
+
+    if action_id == "v2_nav_jump__test_plan":
+        # Clicking the TestMyPlan tab directly (not via the Threat Profile
+        # Trigger button) had no handler at all -- fell through to the
+        # generic no-op below and did nothing. Reconstruct the real plan
+        # card from whatever was last picked on Threat Profile instead.
+        from .plan_catalog_v2 import find_plan_id_for_taxonomy
+        from .threat_map_v2_data import _find_threat
+        from .threats_v2_data import THREATS
+
+        nav = persistence_v2.load_threat_profile_nav(slack_team_id) if slack_team_id else {}
+        active_module = nav.get("active_module")
+        raw_key = nav.get("active_threat")
+        active_incident = nav.get("active_incident")
+        active_cause = nav.get("active_cause")
+        active_phase = nav.get("active_phase")
+        active_scenario = nav.get("active_scenario")
+        active_crit = nav.get("active_crit")
+
+        plan_id = None
+        if active_module and raw_key and active_incident and active_cause:
+            plan_id = find_plan_id_for_taxonomy(active_module, raw_key, active_incident, active_cause)
+
+        if plan_id and active_phase and active_scenario:
+            # Same breadcrumb trail the Trigger button passes -- reconstructed
+            # here from the real taxonomy so it shows the same way whether you
+            # got here by clicking Trigger or jumping straight to this tab.
+            threat_label = next((t["label"] for t in THREATS if t["key"] == raw_key), raw_key)
+            taxonomy_threat = _find_threat(active_module, raw_key)
+            incident_name, cause_name = active_incident, active_cause
+            if taxonomy_threat:
+                incident = next((inc for inc in taxonomy_threat["incidents"] if inc["id"] == active_incident), None)
+                if incident:
+                    incident_name = incident["name"]
+                    cause = next((c for c in incident["causes"] if c["id"] == active_cause), None)
+                    if cause:
+                        cause_name = cause["name"]
+            breadcrumb = {
+                "module": active_module, "crit": active_crit, "threat": threat_label,
+                "incident": incident_name, "cause": cause_name, "phase": active_phase, "scenario": active_scenario,
+            }
+            card = build_real_test_plan_card(
+                plan_id, active_phase, active_scenario, breadcrumb=breadcrumb, slack_team_id=slack_team_id, bot_token=bot_token,
+            )
+        else:
+            card = {
+                "blocks": [
+                    {"type": "header", "text": {"type": "plain_text", "text": ":clipboard: Step 6 · Test plan", "emoji": True}},
+                    {"type": "section", "text": {"type": "mrkdwn", "text": "_Pick a Threat → Incident → Cause → Phase → Scenario on Threat Profile first, then Trigger a test to see it here._"}},
+                ]
+            }
+        _replace_message(response_url, with_nav_bar_v2(card, "test_plan"))
         return
 
     if action_id.startswith("v2_nav_jump__"):

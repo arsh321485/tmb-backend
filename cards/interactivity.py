@@ -23,13 +23,138 @@ logger = logging.getLogger(__name__)
 
 def handle_block_action(payload: dict) -> None:
     """
-    Nothing real routes here anymore -- the old wizard cards that used
-    these action_ids are gone. Logged rather than silently dropped, in
-    case a stale card from before the deletion is still sitting in
-    someone's Slack and gets clicked.
+    Real backend features that aren't part of the new-design preview
+    route here, by exact action_id.
     """
     actions = payload.get("actions") or []
     action_id = actions[0].get("action_id", "") if actions else ""
+    action = actions[0] if actions else {}
+
+    if action_id == "resmap_confirm":
+        from plans.models import Plan
+        from plans.resilience_gaps import find_resilience_gaps, other_resilience_maps_for_team
+        from cards.resilience_map_v2 import update_card, send_gaps_card, send_objectives_card
+
+        plan_id = action.get("value", "")
+        team_id = payload.get("team", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        channel_id = payload.get("channel", {}).get("id", "")
+        message_ts = payload.get("message", {}).get("ts", "")
+
+        plan = Plan.objects(id=plan_id).first() if plan_id else None
+        if plan:
+            plan.resilience_map_status = "approved"
+            plan.save()
+            update_card(plan, channel_id, message_ts, bot_token)
+
+            # A11 -- if there's anything to flag, show it next; if the
+            # map is already clean, skip straight to A12.
+            other_plans = other_resilience_maps_for_team(team_id, exclude_plan_id=plan.id)
+            gaps = find_resilience_gaps(plan.resilience_map or {}, other_plans=other_plans)
+            if gaps:
+                send_gaps_card(plan, channel_id, bot_token)
+            else:
+                send_objectives_card(plan, channel_id, bot_token)
+        return
+
+    if action_id == "resmap_gap_accept":
+        from plans.models import Plan
+        from plans.resilience_gaps import find_resilience_gaps, other_resilience_maps_for_team
+        from cards.resilience_map_v2 import update_gaps_card, send_objectives_card
+
+        value = action.get("value", "")
+        plan_id, _, key = value.partition("|")
+        team_id = payload.get("team", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        channel_id = payload.get("channel", {}).get("id", "")
+        message_ts = payload.get("message", {}).get("ts", "")
+
+        plan = Plan.objects(id=plan_id).first() if plan_id else None
+        if plan and key:
+            if key not in plan.accepted_gaps:
+                plan.accepted_gaps.append(key)
+                plan.save()
+            update_gaps_card(plan, channel_id, message_ts, bot_token)
+
+            # Once every flagged gap is accepted, move on to A12
+            # automatically -- the owner shouldn't have to go looking
+            # for the next step themselves.
+            other_plans = other_resilience_maps_for_team(team_id, exclude_plan_id=plan.id)
+            gaps = find_resilience_gaps(plan.resilience_map or {}, other_plans=other_plans)
+            all_keys = {f"{g['service']}|{g['issue']}" for g in gaps}
+            if all_keys and all_keys.issubset(set(plan.accepted_gaps)):
+                send_objectives_card(plan, channel_id, bot_token)
+        return
+
+    if action_id == "resmap_gap_accept_all":
+        from plans.models import Plan
+        from plans.resilience_gaps import find_resilience_gaps, other_resilience_maps_for_team
+        from cards.resilience_map_v2 import update_gaps_card, send_objectives_card
+
+        plan_id = action.get("value", "")
+        team_id = payload.get("team", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        channel_id = payload.get("channel", {}).get("id", "")
+        message_ts = payload.get("message", {}).get("ts", "")
+
+        plan = Plan.objects(id=plan_id).first() if plan_id else None
+        if plan:
+            other_plans = other_resilience_maps_for_team(team_id, exclude_plan_id=plan.id)
+            gaps = find_resilience_gaps(plan.resilience_map or {}, other_plans=other_plans)
+            all_keys = {f"{g['service']}|{g['issue']}" for g in gaps}
+            newly_accepted = all_keys - set(plan.accepted_gaps or [])
+            if newly_accepted:
+                plan.accepted_gaps.extend(newly_accepted)
+                plan.save()
+            update_gaps_card(plan, channel_id, message_ts, bot_token)
+            send_objectives_card(plan, channel_id, bot_token)
+        return
+
+    if action_id == "resmap_gap_noop":
+        return
+
+    if action_id == "resmap_retry":
+        from plans.models import Plan
+        from plans.resilience_map import extract_resilience_map
+        from cards.resilience_map_v2 import send_card, update_retry_card
+
+        plan_id = action.get("value", "")
+        team_id = payload.get("team", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        channel_id = payload.get("channel", {}).get("id", "")
+        message_ts = payload.get("message", {}).get("ts", "")
+
+        plan = Plan.objects(id=plan_id).first() if plan_id else None
+        if plan:
+            resilience_map = extract_resilience_map(plan.extracted_text)
+            if resilience_map:
+                plan.resilience_map = resilience_map
+                plan.resilience_map_status = "proposed"
+                plan.save()
+                send_card(plan, channel_id, bot_token)
+            else:
+                # Still no luck -- leave the retry button up so they
+                # can try again rather than dead-ending them.
+                update_retry_card(plan, channel_id, message_ts, bot_token)
+        return
+
+    if action_id == "resmap_objectives_lock":
+        from plans.models import Plan
+        from cards.resilience_map_v2 import update_objectives_card
+
+        plan_id = action.get("value", "")
+        team_id = payload.get("team", {}).get("id", "")
+        bot_token = get_bot_token(team_id)
+        channel_id = payload.get("channel", {}).get("id", "")
+        message_ts = payload.get("message", {}).get("ts", "")
+
+        plan = Plan.objects(id=plan_id).first() if plan_id else None
+        if plan:
+            plan.objectives_register_status = "approved"
+            plan.save()
+            update_objectives_card(plan, channel_id, message_ts, bot_token)
+        return
+
     logger.info("block_actions with no handler (old command-center card?): action_id=%s", action_id)
 
 

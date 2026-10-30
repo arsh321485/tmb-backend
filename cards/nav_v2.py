@@ -9,7 +9,7 @@ ever affect the real, live command-center cards.
 NAV_STEPS_V2 = [
     ("Welcome", "welcome"),
     ("Admins", "admins"),
-    ("Configure Teams", "teams"),
+    ("Teams", "teams"),
     ("Threat Profile", "org_threats"),
     ("TestMyPlan", "test_plan"),
 ]

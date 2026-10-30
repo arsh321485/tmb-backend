@@ -33,7 +33,7 @@ SLACK_API_BASE = "https://slack.com/api"
 CALLBACK_ID = "v2_team_copy_modal"
 
 
-def build_modal_view(source_team_id: str, channel_id: str = "", message_ts: str = "", slack_team_id: str = "") -> dict:
+def build_modal_view(source_team_id: str, channel_id: str = "", message_ts: str = "", slack_team_id: str = "", bot_token: str = "") -> dict:
     from . import persistence_v2
 
     source_team = find_team(source_team_id)
@@ -42,6 +42,17 @@ def build_modal_view(source_team_id: str, channel_id: str = "", message_ts: str 
         saved = persistence_v2.load_teams_state(slack_team_id)
         source_members = [m for m in saved["teams"].get(source_team_id, []) if m.get("primary")]
 
+    by_code = {}
+    if bot_token:
+        from .slack_members_v2 import get_workspace_people
+
+        by_code = {p["i"]: p for p in get_workspace_people(bot_token)}
+
+    def _who(member: dict) -> str:
+        primary_name = by_code.get(member["primary"][0], {}).get("n", "?") if member.get("primary") else "—"
+        backup_name = by_code.get(member["backup"][0], {}).get("n", "?") if member.get("backup") else "—"
+        return f"Primary: {primary_name} · Backup: {backup_name}"
+
     siblings = [t for t in ALL_TEAMS if t["tier"] == (source_team or {}).get("tier") and t["id"] != source_team_id]
 
     blocks = [
@@ -49,7 +60,7 @@ def build_modal_view(source_team_id: str, channel_id: str = "", message_ts: str 
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"Applies a person from *{source_team_id} · {(source_team or {}).get('name', '')}* as Primary/Backup onto every still-open role on the team(s) picked below.",
+                "text": f"Applies a person from *{(source_team or {}).get('name', '')}* as Primary/Backup onto every still-open role on the team(s) picked below.",
             },
         }
     ]
@@ -76,10 +87,19 @@ def build_modal_view(source_team_id: str, channel_id: str = "", message_ts: str 
             "blocks": blocks,
         }
 
+    # Who's actually on each staffed role here -- so the admin doesn't
+    # have to leave this modal and go check Configure Teams first.
+    overview_lines = [f"• *{m['role']}* — {_who(m)}" for m in source_members]
+    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(overview_lines)}})
+    blocks.append({"type": "divider"})
+
     # Which real assignment on the source team to apply -- the person is
     # what gets carried over, not the role name (the target team almost
-    # certainly doesn't have this exact role).
-    role_options = [{"text": {"type": "plain_text", "text": m["role"][:75]}, "value": m["role"]} for m in source_members]
+    # certainly doesn't have this exact role). Option text also shows who
+    # primary/backup actually are, not just the role name.
+    role_options = [
+        {"text": {"type": "plain_text", "text": f"{m['role']} ({_who(m)})"[:75]}, "value": m["role"]} for m in source_members
+    ]
     blocks.append(
         {
             "type": "input",
@@ -96,7 +116,7 @@ def build_modal_view(source_team_id: str, channel_id: str = "", message_ts: str 
     )
 
     target_options = [
-        {"text": {"type": "plain_text", "text": f"{t['id']} · {t['name']}"[:75]}, "value": t["id"]}
+        {"text": {"type": "plain_text", "text": t["name"][:75]}, "value": t["id"]}
         for t in siblings
     ]
     blocks.append(
@@ -134,7 +154,7 @@ def open_modal(trigger_id: str, source_team_id: str, channel_id: str, message_ts
     requests.post(
         f"{SLACK_API_BASE}/views.open",
         headers={"Authorization": f"Bearer {bot_token}"},
-        json={"trigger_id": trigger_id, "view": build_modal_view(source_team_id, channel_id, message_ts, slack_team_id=slack_team_id)},
+        json={"trigger_id": trigger_id, "view": build_modal_view(source_team_id, channel_id, message_ts, slack_team_id=slack_team_id, bot_token=bot_token)},
         timeout=10,
     )
 
@@ -219,7 +239,7 @@ def handle_submission(payload: dict, bot_token: str) -> None:
     if channel_id and message_ts and bot_token:
         people = get_workspace_people(bot_token)
         state = persistence_v2.load_teams_state(team_id_slack)
-        card = with_nav_bar_v2(build_teams_card(state, people), "teams")
+        card = with_nav_bar_v2(build_teams_card(state, people, slack_team_id=team_id_slack), "teams")
         resp_json = requests.post(
             f"{SLACK_API_BASE}/chat.update",
             headers={"Authorization": f"Bearer {bot_token}"},

@@ -34,10 +34,14 @@ def send_team_assignment_dm(
     if not (team_id and bot_token):
         return
 
-    from . import role_welcome_v2
+    from . import persistence_v2, role_welcome_v2
+
+    resolved_catalog_team_id = catalog_team_id or team_id
 
     if primary_slack_user_id:
-        role_welcome_v2.send_welcome_dm(primary_slack_user_id, catalog_team_id or team_id, team_name, role, False, bot_token)
+        ok = role_welcome_v2.send_welcome_dm(primary_slack_user_id, resolved_catalog_team_id, team_name, role, False, bot_token)
+        persistence_v2.record_dm_status(team_id, resolved_catalog_team_id, role, primary_slack_user_id, "sent" if ok else "failed")
 
     if backup_slack_user_id and backup_slack_user_id != primary_slack_user_id:
-        role_welcome_v2.send_welcome_dm(backup_slack_user_id, catalog_team_id or team_id, team_name, role, True, bot_token)
+        ok = role_welcome_v2.send_welcome_dm(backup_slack_user_id, resolved_catalog_team_id, team_name, role, True, bot_token)
+        persistence_v2.record_dm_status(team_id, resolved_catalog_team_id, role, backup_slack_user_id, "sent" if ok else "failed")
