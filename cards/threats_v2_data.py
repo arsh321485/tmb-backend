@@ -224,7 +224,7 @@ def _add_form_blocks(form: dict, custom: list) -> list:
     return blocks
 
 
-def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
+def build_org_threats_card(state: dict, profile: dict | None = None, team_id: str = "") -> dict:
     """
     state: {"fixed": {key: crit}, "custom": [{"module","label","crit"}],
     "form": {"module","threat","crit"} | None}.
@@ -235,17 +235,27 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
     fixed mockup company. Workforce size / tech estate aren't collected
     yet (no fields for them on that step), so those tags are omitted
     until that's added rather than showing fake placeholder numbers.
+
+    team_id: A18 -- re-ranks THREATS against the real resilience map
+    (plans/threat_ranking.py) instead of the fixed sample criticality/
+    "why" text, when a real plan exists for this workspace.
     """
+    threats = THREATS
+    if team_id:
+        from plans.threat_ranking import rank_threats
+
+        threats = rank_threats(team_id, THREATS)
+
     fixed_state = state.get("fixed", {})
     custom = state.get("custom", [])
     form = state.get("form")
 
-    fixed_kept = [t for t in THREATS if fixed_state.get(t["key"], t["default_crit"]) != "Dropped"]
+    fixed_kept = [t for t in threats if fixed_state.get(t["key"], t["default_crit"]) != "Dropped"]
     custom_kept = [c for c in custom if c["crit"] != "Dropped"]
     total_kept = len(fixed_kept) + len(custom_kept)
 
     counts = {"Critical": 0, "High": 0, "Med": 0, "Dropped": 0}
-    for t in THREATS:
+    for t in threats:
         counts[fixed_state.get(t["key"], t["default_crit"])] += 1
     for c in custom:
         counts[c["crit"]] += 1
@@ -306,7 +316,7 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
     blocks.append({"type": "divider"})
     tab_elements = []
     for module in MODULES:
-        mod_fixed = [t for t in THREATS if t["module"] == module]
+        mod_fixed = [t for t in threats if t["module"] == module]
         mod_custom = [c for c in custom if c["module"] == module]
         mod_kept = len([t for t in mod_fixed if fixed_state.get(t["key"], t["default_crit"]) != "Dropped"]) + \
             len([c for c in mod_custom if c["crit"] != "Dropped"])
@@ -325,7 +335,7 @@ def build_org_threats_card(state: dict, profile: dict | None = None) -> dict:
     # All threats (fixed + custom) for the active module, each carrying
     # its own effective criticality -- drives both the criticality tab row
     # and the threat-name tab row below it.
-    mod_fixed = [t for t in THREATS if t["module"] == active_module]
+    mod_fixed = [t for t in threats if t["module"] == active_module]
     mod_custom_list = [c for c in custom if c["module"] == active_module]
     mod_items = [
         {"key": t["key"], "label": t["label"], "crit": fixed_state.get(t["key"], t["default_crit"]), "custom": False, "why": t["why"]}

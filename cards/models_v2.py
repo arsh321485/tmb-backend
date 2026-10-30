@@ -209,3 +209,43 @@ class ScenarioSelection(me.Document):
         "indexes": [{"fields": ["team_id", "module"], "unique": True}],
         "strict": False,
     }
+
+
+STATUS_PROPOSED = "proposed"
+STATUS_APPROVED = "approved"
+
+
+class GeneratedScenario(me.Document):
+    """
+    A22/A23 -- one AI-written scenario (plans/scenario_generator.py) for
+    a given module's Threat -> Incident -> Cause -> Phase pick, built
+    from the org's real plan and real assigned roles instead of the one
+    fixed ransomware story. Held here as "proposed" until the exercise
+    lead reviews and approves it (A23) -- nothing here is live/sendable
+    to real participants until approved=True.
+    """
+
+    team_id = me.StringField(required=True)
+    module = me.StringField(required=True)
+    threat_id = me.StringField(required=False)
+    incident_id = me.StringField(required=False)
+    cause_id = me.StringField(required=False)
+    threat_label = me.StringField(required=False)
+    incident_name = me.StringField(required=False)
+    cause_name = me.StringField(required=False)
+    phases = me.ListField(me.StringField(), default=list)
+
+    # [{"inject_id","type","phase","seq","title","target_role",
+    #   "inject_message","decision_id","decision_question",
+    #   "options":[{"option","option_text","score","rating","feedback","triggers_inject"}]}]
+    injects = me.ListField(me.DictField(), default=list)
+    # [{"inject_id","type","phase","title","target_role","inject_message"}]
+    consequence_injects = me.ListField(me.DictField(), default=list)
+
+    status = me.StringField(choices=(STATUS_PROPOSED, STATUS_APPROVED), default=STATUS_PROPOSED)
+    approved_by_slack_user_id = me.StringField(required=False)
+    approved_at = me.DateTimeField(required=False)
+
+    created_at = me.DateTimeField(default=datetime.datetime.utcnow)
+
+    meta = {"collection": "generated_scenarios", "ordering": ["-created_at"], "strict": False}

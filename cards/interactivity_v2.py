@@ -95,7 +95,7 @@ def _redraw_threats(response_url: str, state: dict, slack_team_id: str = "") -> 
         state["visited_combos"] = persistence_v2.load_visited_combos(slack_team_id)
 
     profile = org_setup_v2.load_profile(slack_team_id) if slack_team_id else None
-    card = build_org_threats_card(state, profile)
+    card = build_org_threats_card(state, profile, team_id=slack_team_id)
 
     if slack_team_id:
         persistence_v2.save_threat_profile_nav(slack_team_id, state)
@@ -149,7 +149,7 @@ def handle_block_action_v2(payload: dict) -> None:
         else:
             state["active_threat"] = action.get("value", "")
         if response_url:
-            _replace_message(response_url, build_threats_center_card(state))
+            _replace_message(response_url, build_threats_center_card(state, team_id=slack_team_id))
         return
 
     if action_id == "v2_tc_launch":
@@ -167,7 +167,7 @@ def handle_block_action_v2(payload: dict) -> None:
             persistence_v2.save_threat_profile_nav(slack_team_id, nav)
         profile = org_setup_v2.load_profile(slack_team_id) if slack_team_id else None
         state = {"fixed": {}, "custom": [], "form": None, **nav}
-        threat_profile_card = with_nav_bar_v2(build_org_threats_card(state, profile), "org_threats")
+        threat_profile_card = with_nav_bar_v2(build_org_threats_card(state, profile, team_id=slack_team_id), "org_threats")
 
         # Launch Test hands off INTO Command Center -- it does not turn
         # this Threats Center channel into a copy of Command Center.
@@ -1119,6 +1119,92 @@ def handle_block_action_v2(payload: dict) -> None:
         )
         card = build_scenario_card(module, threat_id, incident_id, cause_id, selected=scenario)
         _replace_message(response_url, with_nav_bar_v2(card, "org_threats"))
+        return
+
+    if action_id == "v2_scenario_generate":
+        from .scenario_v2_data import _breadcrumb, build_generating_card, build_scenario_failed_card, build_scenario_review_card
+        from .threat_map_v2_data import _find_incident, _find_threat
+        from .models_v2 import GeneratedScenario
+        from plans.scenario_generator import generate_scenario
+
+        module, threat_id, incident_id, cause_id = action.get("value", "").split(":", 3)
+        breadcrumb = _breadcrumb(module, threat_id, incident_id, cause_id)
+
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(build_generating_card(breadcrumb), "threat_map"))
+
+        threat = _find_threat(module, threat_id)
+        incident = _find_incident(module, threat_id, incident_id)
+        cause = next((c for c in (incident or {}).get("causes", []) if c["id"] == cause_id), None) if incident else None
+        threat_label = threat["label"] if threat else threat_id
+        incident_name = incident["name"] if incident else incident_id
+        cause_name = cause["name"] if cause else cause_id
+
+        result = generate_scenario(slack_team_id, threat_label, incident_name, cause_name, ["Identification", "Containment"])
+        if not result or not result.get("injects"):
+            if response_url:
+                _replace_message(
+                    response_url,
+                    with_nav_bar_v2(
+                        build_scenario_failed_card(
+                            breadcrumb,
+                            "Couldn't write a scenario -- make sure a real plan is uploaded and roles are assigned for this workspace, then try again.",
+                        ),
+                        "threat_map",
+                    ),
+                )
+            return
+
+        doc = GeneratedScenario(
+            team_id=slack_team_id, module=module, threat_id=threat_id, incident_id=incident_id, cause_id=cause_id,
+            threat_label=threat_label, incident_name=incident_name, cause_name=cause_name,
+            phases=["Identification", "Containment"],
+            injects=result["injects"], consequence_injects=result.get("consequence_injects", []),
+        )
+        doc.save()
+
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "threat_map"))
+        return
+
+    if action_id in ("v2_scenario_approve", "v2_scenario_regenerate"):
+        from .scenario_v2_data import _breadcrumb, build_generating_card, build_scenario_failed_card, build_scenario_review_card
+        from .models_v2 import GeneratedScenario
+        from plans.scenario_generator import generate_scenario
+
+        doc = GeneratedScenario.objects(id=action.get("value", "")).first()
+        if not doc:
+            return
+        breadcrumb = f"{doc.threat_label}  ›  {doc.incident_name}  ›  {doc.cause_name}"
+
+        if action_id == "v2_scenario_approve":
+            import datetime
+
+            doc.status = "approved"
+            doc.approved_by_slack_user_id = current_user_id
+            doc.approved_at = datetime.datetime.utcnow()
+            doc.save()
+            if response_url:
+                _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "threat_map"))
+            return
+
+        # v2_scenario_regenerate -- discard this proposal and write a new one
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(build_generating_card(breadcrumb), "threat_map"))
+        result = generate_scenario(doc.team_id, doc.threat_label, doc.incident_name, doc.cause_name, doc.phases)
+        if not result or not result.get("injects"):
+            doc.delete()
+            if response_url:
+                _replace_message(response_url, with_nav_bar_v2(build_scenario_failed_card(breadcrumb, "The regeneration attempt failed -- try again."), "threat_map"))
+            return
+        doc.injects = result["injects"]
+        doc.consequence_injects = result.get("consequence_injects", [])
+        doc.status = "proposed"
+        doc.approved_by_slack_user_id = None
+        doc.approved_at = None
+        doc.save()
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "threat_map"))
         return
 
     if action_id == "v2_scenario_done":

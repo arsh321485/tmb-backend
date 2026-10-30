@@ -292,7 +292,7 @@ def _finish_new_workspace_onboarding(team_id: str, authed_user_id: str, bot_toke
 
     threats_center_channel_id = get_or_create_channel(team_id, authed_user_id, bot_token)
     if threats_center_channel_id:
-        card = build_threats_center_card({"active_module": None, "active_crit": None, "active_threat": None, "fixed": {}})
+        card = build_threats_center_card({"active_module": None, "active_crit": None, "active_threat": None, "fixed": {}}, team_id=team_id)
         requests.post(
             f"{SLACK_TOKEN_URL.rsplit('/', 1)[0]}/chat.postMessage",
             headers={"Authorization": f"Bearer {bot_token}"},

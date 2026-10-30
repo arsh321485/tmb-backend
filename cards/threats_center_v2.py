@@ -79,12 +79,18 @@ def read_current_state(message_blocks: list) -> dict:
     return {"active_module": active_module, "active_crit": active_crit, "active_threat": active_threat, "fixed": fixed}
 
 
-def build_threats_center_card(state: dict) -> dict:
+def build_threats_center_card(state: dict, team_id: str = "") -> dict:
+    threats = THREATS
+    if team_id:
+        from plans.threat_ranking import rank_threats
+
+        threats = rank_threats(team_id, THREATS)
+
     fixed_state = state.get("fixed", {})
     active_module = state.get("active_module") or MODULES[0]
 
     counts = {"Critical": 0, "High": 0, "Med": 0}
-    for t in THREATS:
+    for t in threats:
         crit = fixed_state.get(t["key"], t["default_crit"])
         if crit in counts:
             counts[crit] += 1
@@ -117,7 +123,7 @@ def build_threats_center_card(state: dict) -> dict:
     # Module tabs
     tab_elements = []
     for module in MODULES:
-        mod_threats = [t for t in THREATS if t["module"] == module]
+        mod_threats = [t for t in threats if t["module"] == module]
         tab_elements.append(
             {
                 "type": "button",
@@ -132,7 +138,7 @@ def build_threats_center_card(state: dict) -> dict:
 
     mod_items = [
         {"key": t["key"], "label": t["label"], "crit": fixed_state.get(t["key"], t["default_crit"]), "why": t["why"], "icon": t["icon"]}
-        for t in THREATS if t["module"] == active_module
+        for t in threats if t["module"] == active_module
     ]
 
     # Criticality tabs -- only ones that actually have a threat

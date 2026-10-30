@@ -52,18 +52,113 @@ def build_scenario_card(module: str, threat_id: str, incident_id: str, cause_id:
         )
 
     blocks.append({"type": "divider"})
-    blocks.append(
+    actions_row = [
         {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": ":clipboard: View the test plan", "emoji": True},
-                    "action_id": "v2_scenario_done",
-                    "value": f"{module}:{selected}",
-                    **({"style": "primary"} if selected else {}),
-                }
-            ],
+            "type": "button",
+            "text": {"type": "plain_text", "text": ":clipboard: View the test plan", "emoji": True},
+            "action_id": "v2_scenario_done",
+            "value": f"{module}:{selected}",
+            **({"style": "primary"} if selected else {}),
         }
-    )
+    ]
+    if selected:
+        # A22 -- writes a real scenario (injects + scored decisions) from
+        # this org's own plan and assigned roles instead of the fixed
+        # sample. Separate from "View the test plan" above, which still
+        # shows the old fixed placeholder checklist for now.
+        actions_row.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": ":sparkles: Generate real scenario with AI", "emoji": True},
+                "action_id": "v2_scenario_generate",
+                "value": f"{module}:{threat_id}:{incident_id}:{cause_id}",
+            }
+        )
+    blocks.append({"type": "actions", "elements": actions_row})
+    return {"blocks": blocks}
+
+
+def build_generating_card(breadcrumb: str) -> dict:
+    return {
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": ":hourglass_flowing_sand: Writing your scenario...", "emoji": True}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_"}]},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "The AI is writing injects and decisions from your real plan and assigned roles. This can take a minute or two -- this message will update when it's ready.",
+                },
+            },
+        ]
+    }
+
+
+def build_scenario_failed_card(breadcrumb: str, reason: str) -> dict:
+    return {
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": ":warning: Couldn't generate a scenario", "emoji": True}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_"}]},
+            {"type": "section", "text": {"type": "mrkdwn", "text": reason}},
+        ]
+    }
+
+
+def build_scenario_review_card(scenario_doc, breadcrumb: str) -> dict:
+    """A23 -- the exercise lead reviews the AI's actual output before
+    anything here can reach a real participant. No per-field editing yet
+    (sir's call: see this working end to end first) -- Approve or discard
+    and regenerate are the two real actions today."""
+    status = scenario_doc.status
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": ":mag: Review AI-generated scenario", "emoji": True}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_"}]},
+    ]
+    if status == "approved":
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ":white_check_mark: *Approved* -- ready to be used in a real drill."}]})
+    blocks.append({"type": "divider"})
+
+    for inj in scenario_doc.injects:
+        lines = [f"*{inj.get('seq', '?')}. {inj.get('title', 'Untitled')}* — _{inj.get('phase', '')}_"]
+        lines.append(f"To: *{inj.get('target_role', '?')}*")
+        lines.append(inj.get("inject_message", ""))
+        lines.append(f"\n*Decision:* {inj.get('decision_question', '')}")
+        for opt in inj.get("options", []):
+            lines.append(f"  • ({opt.get('rating', '?')}, {opt.get('score', '?')}/10) {opt.get('option_text', '')}")
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}})
+        blocks.append({"type": "divider"})
+
+    if scenario_doc.consequence_injects:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "*Consequence injects (triggered by a Poor choice)*"}]})
+        for inj in scenario_doc.consequence_injects:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*{inj.get('title', 'Untitled')}* — To: {inj.get('target_role', '?')}\n{inj.get('inject_message', '')}"},
+                }
+            )
+        blocks.append({"type": "divider"})
+
+    if status != "approved":
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "✅ Approve this scenario", "emoji": True},
+                        "action_id": "v2_scenario_approve",
+                        "value": str(scenario_doc.id),
+                        "style": "primary",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "🔄 Discard and regenerate", "emoji": True},
+                        "action_id": "v2_scenario_regenerate",
+                        "value": str(scenario_doc.id),
+                    },
+                ],
+            }
+        )
     return {"blocks": blocks}

@@ -54,7 +54,7 @@ def handle_threats(args, user_id, channel_id, team_id):
     if not target_channel_id:
         return _ephemeral(":warning: Couldn't create or find the #testmyplan-threats-center channel. Check the bot has the `channels:manage` scope.")
 
-    card = build_threats_center_card({"active_module": None, "active_crit": None, "active_threat": None, "fixed": {}})
+    card = build_threats_center_card({"active_module": None, "active_crit": None, "active_threat": None, "fixed": {}}, team_id=team_id)
     import requests as http
 
     http.post(
