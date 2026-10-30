@@ -117,6 +117,16 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str) -> dict:
     ]
     if status == "approved":
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ":white_check_mark: *Approved* -- ready to be used in a real drill."}]})
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {"type": "button", "text": {"type": "plain_text", "text": "Trigger now", "emoji": True}, "action_id": "v2_ai_trigger_now", "value": str(scenario_doc.id), "style": "danger"},
+                    {"type": "button", "text": {"type": "plain_text", "text": "Schedule", "emoji": True}, "action_id": "v2_ai_trigger_schedule_open", "value": str(scenario_doc.id)},
+                    {"type": "button", "text": {"type": "plain_text", "text": "Surprise window", "emoji": True}, "action_id": "v2_ai_trigger_surprise", "value": str(scenario_doc.id)},
+                ],
+            }
+        )
     blocks.append({"type": "divider"})
 
     for inj in scenario_doc.injects:

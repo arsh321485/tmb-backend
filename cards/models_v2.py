@@ -249,3 +249,70 @@ class GeneratedScenario(me.Document):
     created_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
     meta = {"collection": "generated_scenarios", "ordering": ["-created_at"], "strict": False}
+
+
+RUN_STATUS_SCHEDULED = "scheduled"
+RUN_STATUS_RUNNING = "running"
+RUN_STATUS_COMPLETED = "completed"
+
+
+class AIExerciseRun(me.Document):
+    """
+    A23/A24 -- one real live run of an approved GeneratedScenario.
+
+    Deliberately its own separate collection, NOT exercises.models.Exercise
+    -- that model and its background firing/escalation logic
+    (exercises/drill.py, exercises/apps.py) are shared by the 3 real
+    pre-built drills (RW-01/02/03) and are left untouched on purpose, so
+    an AI-generated run can never collide with or be picked up by that
+    existing engine. This is a fully independent, parallel path that
+    happens to produce the same real experience for participants.
+    """
+
+    team_id = me.StringField(required=True)
+    scenario = me.ReferenceField(GeneratedScenario, required=True)
+
+    trigger_type = me.StringField(required=False)  # "now" / "scheduled" / "surprise"
+    status = me.StringField(choices=(RUN_STATUS_SCHEDULED, RUN_STATUS_RUNNING, RUN_STATUS_COMPLETED), default=RUN_STATUS_SCHEDULED)
+    scheduled_at = me.DateTimeField(required=False)
+
+    # Position in scenario.injects (by seq) the run is currently waiting
+    # on -- None once every Main inject has been resolved.
+    current_seq = me.IntField(required=False)
+
+    started_by_slack_user_id = me.StringField(required=False)
+    # Where the Trigger/Schedule button was clicked from -- so the report
+    # can be posted back there automatically once the run completes,
+    # instead of just sitting in the database with nowhere shown for it.
+    origin_channel_id = me.StringField(required=False)
+    started_at = me.DateTimeField(required=False)
+    ended_at = me.DateTimeField(required=False)
+
+    created_at = me.DateTimeField(default=datetime.datetime.utcnow)
+
+    meta = {"collection": "ai_exercise_runs", "ordering": ["-created_at"], "strict": False}
+
+
+class AIDecisionResponse(me.Document):
+    """One real answer to one real AI-generated inject's decision --
+    separate collection from exercises.models.DecisionResponse for the
+    same isolation reason as AIExerciseRun."""
+
+    run = me.ReferenceField(AIExerciseRun, required=True)
+    inject_id = me.StringField(required=True)
+    decision_id = me.StringField(required=True)
+    assigned_slack_user_id = me.StringField(required=True)
+    target_role = me.StringField(required=False)
+
+    chosen_option = me.StringField(required=False)
+    score = me.IntField(required=False)
+    rating = me.StringField(required=False)
+    triggers_inject = me.StringField(required=False)
+
+    slack_channel_id = me.StringField(required=False)
+    slack_message_ts = me.StringField(required=False)
+
+    sent_at = me.DateTimeField(default=datetime.datetime.utcnow)
+    responded_at = me.DateTimeField(required=False)
+
+    meta = {"collection": "ai_decision_responses", "ordering": ["sent_at"], "strict": False}

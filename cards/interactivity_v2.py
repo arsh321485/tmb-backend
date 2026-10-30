@@ -1176,6 +1176,51 @@ def handle_block_action_v2(payload: dict) -> None:
             _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "org_threats"))
         return
 
+    if action_id == "v2_ai_trigger_now":
+        from . import ai_drill_v2
+        from .models_v2 import GeneratedScenario
+
+        scenario = GeneratedScenario.objects(id=action.get("value", "")).first()
+        if not scenario or not bot_token:
+            return
+        run = ai_drill_v2.start_run(scenario, "now", current_user_id, bot_token, origin_channel_id=top_channel_id)
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_run_status_card(run, scenario), "org_threats"))
+        return
+
+    if action_id == "v2_ai_trigger_surprise":
+        import datetime
+        import random
+
+        from . import ai_drill_v2
+        from .models_v2 import GeneratedScenario
+
+        scenario = GeneratedScenario.objects(id=action.get("value", "")).first()
+        if not scenario or not bot_token:
+            return
+        # Simple surprise window: a random time 1-24 hours from now --
+        # keeps the real "nobody knows exactly when" effect without
+        # needing a separate window-picker modal.
+        scheduled_at = datetime.datetime.utcnow() + datetime.timedelta(minutes=random.randint(60, 24 * 60))
+        run = ai_drill_v2.start_run(scenario, "surprise", current_user_id, bot_token, scheduled_at=scheduled_at, origin_channel_id=top_channel_id)
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_run_status_card(run, scenario), "org_threats"))
+        return
+
+    if action_id == "v2_ai_trigger_schedule_open":
+        from .ai_trigger_schedule_modal_v2 import open_modal
+
+        trigger_id = payload.get("trigger_id", "")
+        if trigger_id and bot_token:
+            open_modal(trigger_id, action.get("value", ""), top_channel_id, bot_token)
+        return
+
+    if action_id.startswith("v2_ai_decision_choose__"):
+        from . import ai_drill_v2
+
+        ai_drill_v2.handle_decision(payload, bot_token)
+        return
+
     if action_id == "v2_scenario_generate":
         from .scenario_v2_data import _breadcrumb, build_generating_card, build_scenario_failed_card, build_scenario_review_card
         from .threat_map_v2_data import _find_incident, _find_threat

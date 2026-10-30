@@ -34,6 +34,7 @@ class ExercisesConfig(AppConfig):
             from .drill import escalate_overdue_tasks, fire_due_scheduled_exercises
             from cards.inject_drill_v2 import escalate_overdue_decisions
             from cards.role_reminders_v2 import check_role_reminders, check_leavers
+            from cards.ai_drill_v2 import check_scheduled_ai_runs
 
             while True:
                 time.sleep(CHECK_INTERVAL_SECONDS)
@@ -71,5 +72,12 @@ class ExercisesConfig(AppConfig):
                         logger.info("Sent %d leaver alert(s) to People & Roles owner", leaver_count)
                 except Exception:
                     logger.exception("Leaver check failed")
+
+                try:
+                    ai_fired = check_scheduled_ai_runs()
+                    if ai_fired:
+                        logger.info("Fired %d scheduled AI scenario run(s)", ai_fired)
+                except Exception:
+                    logger.exception("Scheduled AI run check failed")
 
         threading.Thread(target=_loop, daemon=True, name="drill-escalation-checker").start()
