@@ -515,31 +515,63 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
 
                                 if active_scenario:
                                     blocks.append({"type": "divider"})
-                                    blocks.append(
+                                    trigger_row = [
                                         {
-                                            "type": "actions",
-                                            "elements": [
+                                            "type": "button",
+                                            "text": {"type": "plain_text", "text": ":rotating_light: TestMyPlan", "emoji": True},
+                                            "action_id": "v2_threat_trigger",
+                                            "value": json.dumps(
                                                 {
-                                                    "type": "button",
-                                                    "text": {"type": "plain_text", "text": ":rotating_light: TestMyPlan", "emoji": True},
-                                                    "action_id": "v2_threat_trigger",
-                                                    "value": json.dumps(
-                                                        {
-                                                            "plan_id": plan_id,
-                                                            "phase": active_phase,
-                                                            "scenario": active_scenario,
-                                                            "module": active_module,
-                                                            "crit": active_crit,
-                                                            "threat": active_item["label"],
-                                                            "incident": selected_incident["name"],
-                                                            "cause": selected_cause["name"],
-                                                        }
-                                                    ),
-                                                    "style": "danger",
+                                                    "plan_id": plan_id,
+                                                    "phase": active_phase,
+                                                    "scenario": active_scenario,
+                                                    "module": active_module,
+                                                    "crit": active_crit,
+                                                    "threat": active_item["label"],
+                                                    "incident": selected_incident["name"],
+                                                    "cause": selected_cause["name"],
                                                 }
-                                            ],
+                                            ),
+                                            "style": "danger",
                                         }
-                                    )
+                                    ]
+
+                                    # Sir's call: even a cause with a fixed
+                                    # pre-built plan can ALSO get a fresh
+                                    # AI-written one from the org's real plan
+                                    # -- not a replacement for TestMyPlan
+                                    # above, just an extra real option next
+                                    # to it. Same "review before it's usable"
+                                    # gate as every other AI-generated one.
+                                    from .models_v2 import GeneratedScenario
+
+                                    existing = None
+                                    if team_id:
+                                        existing = GeneratedScenario.objects(
+                                            team_id=team_id, module=active_module, threat_id=raw_key,
+                                            incident_id=selected_incident["id"], cause_id=selected_cause["id"],
+                                        ).order_by("-created_at").first()
+
+                                    if existing:
+                                        review_label = ":white_check_mark: Review approved AI scenario" if existing.status == "approved" else ":mag: Review AI scenario"
+                                        trigger_row.append(
+                                            {
+                                                "type": "button",
+                                                "text": {"type": "plain_text", "text": review_label, "emoji": True},
+                                                "action_id": "v2_threat_scenario_review",
+                                                "value": str(existing.id),
+                                            }
+                                        )
+                                    else:
+                                        trigger_row.append(
+                                            {
+                                                "type": "button",
+                                                "text": {"type": "plain_text", "text": ":sparkles: Generate real scenario with AI", "emoji": True},
+                                                "action_id": "v2_threat_scenario_generate",
+                                                "value": f"{active_module}|{raw_key}|{selected_incident['id']}|{selected_cause['id']}",
+                                            }
+                                        )
+                                    blocks.append({"type": "actions", "elements": trigger_row})
                         else:
                             # A22 -- every cause except the one hand-written
                             # ransomware plan_id lands here with nothing
