@@ -541,7 +541,53 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
                                         }
                                     )
                         else:
-                            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No real test plan mapped for this cause yet._"}]})
+                            # A22 -- every cause except the one hand-written
+                            # ransomware plan_id lands here with nothing
+                            # real to run. Instead of a dead end, offer to
+                            # have the AI write a real scenario for this
+                            # exact Threat -> Incident -> Cause, from this
+                            # workspace's own plan and assigned roles.
+                            from .models_v2 import GeneratedScenario
+
+                            existing = None
+                            if team_id:
+                                existing = GeneratedScenario.objects(
+                                    team_id=team_id, module=active_module, threat_id=raw_key,
+                                    incident_id=selected_incident["id"], cause_id=selected_cause["id"],
+                                ).order_by("-created_at").first()
+
+                            if existing:
+                                status_text = ":white_check_mark: *AI scenario approved* -- ready to run." if existing.status == "approved" else ":memo: *AI scenario written* -- needs review and approval."
+                                blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": status_text}]})
+                                blocks.append(
+                                    {
+                                        "type": "actions",
+                                        "elements": [
+                                            {
+                                                "type": "button",
+                                                "text": {"type": "plain_text", "text": ":mag: Review AI scenario", "emoji": True},
+                                                "action_id": "v2_threat_scenario_review",
+                                                "value": str(existing.id),
+                                                "style": "primary",
+                                            }
+                                        ],
+                                    }
+                                )
+                            else:
+                                blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No real test plan mapped for this cause yet._"}]})
+                                blocks.append(
+                                    {
+                                        "type": "actions",
+                                        "elements": [
+                                            {
+                                                "type": "button",
+                                                "text": {"type": "plain_text", "text": ":sparkles: Generate real scenario with AI", "emoji": True},
+                                                "action_id": "v2_threat_scenario_generate",
+                                                "value": f"{active_module}|{raw_key}|{selected_incident['id']}|{selected_cause['id']}",
+                                            }
+                                        ],
+                                    }
+                                )
             elif not active_item["custom"]:
                 blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No incidents mapped for this threat yet._"}]})
 

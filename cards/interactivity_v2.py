@@ -1121,6 +1121,61 @@ def handle_block_action_v2(payload: dict) -> None:
         _replace_message(response_url, with_nav_bar_v2(card, "org_threats"))
         return
 
+    if action_id in ("v2_threat_scenario_generate", "v2_threat_scenario_review"):
+        from .scenario_v2_data import _breadcrumb, build_generating_card, build_scenario_failed_card, build_scenario_review_card
+        from .threat_map_v2_data import _find_incident, _find_threat
+        from .models_v2 import GeneratedScenario
+        from plans.scenario_generator import generate_scenario
+
+        if action_id == "v2_threat_scenario_review":
+            doc = GeneratedScenario.objects(id=action.get("value", "")).first()
+            if not doc:
+                return
+            breadcrumb = _breadcrumb(doc.module, doc.threat_id, doc.incident_id, doc.cause_id)
+            if response_url:
+                _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "org_threats"))
+            return
+
+        module, threat_id, incident_id, cause_id = action.get("value", "").split("|", 3)
+        breadcrumb = _breadcrumb(module, threat_id, incident_id, cause_id)
+
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(build_generating_card(breadcrumb), "org_threats"))
+
+        threat = _find_threat(module, threat_id)
+        incident = _find_incident(module, threat_id, incident_id)
+        cause = next((c for c in (incident or {}).get("causes", []) if c["id"] == cause_id), None) if incident else None
+        threat_label = threat["label"] if threat else threat_id
+        incident_name = incident["name"] if incident else incident_id
+        cause_name = cause["name"] if cause else cause_id
+
+        result = generate_scenario(slack_team_id, threat_label, incident_name, cause_name, ["Identification", "Containment"])
+        if not result or not result.get("injects"):
+            if response_url:
+                _replace_message(
+                    response_url,
+                    with_nav_bar_v2(
+                        build_scenario_failed_card(
+                            breadcrumb,
+                            "Couldn't write a scenario -- make sure a real plan is uploaded and roles are assigned for this workspace, then try again.",
+                        ),
+                        "org_threats",
+                    ),
+                )
+            return
+
+        doc = GeneratedScenario(
+            team_id=slack_team_id, module=module, threat_id=threat_id, incident_id=incident_id, cause_id=cause_id,
+            threat_label=threat_label, incident_name=incident_name, cause_name=cause_name,
+            phases=["Identification", "Containment"],
+            injects=result["injects"], consequence_injects=result.get("consequence_injects", []),
+        )
+        doc.save()
+
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "org_threats"))
+        return
+
     if action_id == "v2_scenario_generate":
         from .scenario_v2_data import _breadcrumb, build_generating_card, build_scenario_failed_card, build_scenario_review_card
         from .threat_map_v2_data import _find_incident, _find_threat
@@ -1185,17 +1240,17 @@ def handle_block_action_v2(payload: dict) -> None:
             doc.approved_at = datetime.datetime.utcnow()
             doc.save()
             if response_url:
-                _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "threat_map"))
+                _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "org_threats"))
             return
 
         # v2_scenario_regenerate -- discard this proposal and write a new one
         if response_url:
-            _replace_message(response_url, with_nav_bar_v2(build_generating_card(breadcrumb), "threat_map"))
+            _replace_message(response_url, with_nav_bar_v2(build_generating_card(breadcrumb), "org_threats"))
         result = generate_scenario(doc.team_id, doc.threat_label, doc.incident_name, doc.cause_name, doc.phases)
         if not result or not result.get("injects"):
             doc.delete()
             if response_url:
-                _replace_message(response_url, with_nav_bar_v2(build_scenario_failed_card(breadcrumb, "The regeneration attempt failed -- try again."), "threat_map"))
+                _replace_message(response_url, with_nav_bar_v2(build_scenario_failed_card(breadcrumb, "The regeneration attempt failed -- try again."), "org_threats"))
             return
         doc.injects = result["injects"]
         doc.consequence_injects = result.get("consequence_injects", [])
@@ -1204,7 +1259,7 @@ def handle_block_action_v2(payload: dict) -> None:
         doc.approved_at = None
         doc.save()
         if response_url:
-            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "threat_map"))
+            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "org_threats"))
         return
 
     if action_id == "v2_scenario_done":
