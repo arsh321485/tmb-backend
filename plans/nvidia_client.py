@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
-_MAX_ATTEMPTS = 3
+_MAX_ATTEMPTS = 1
 _RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
@@ -86,15 +86,19 @@ def _call_with_retries(payload: dict, api_key: str):
     last_error = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            # This is a shared/public endpoint and genuinely slow under
-            # load (confirmed live: timed out twice at 60s on a real
-            # upload) -- 120s gives a loaded reasoning model room to
-            # actually finish instead of retrying into the same wall.
+            # Every real caller of this (resilience_map.py, scenario_generator.py,
+            # ...) already falls back to Gemini if this returns None --
+            # confirmed live that NVIDIA can sit well past 120s under load,
+            # which meant a real upload could wait 6+ minutes retrying the
+            # same stuck endpoint 3x before Gemini ever got a turn. One real
+            # 60s attempt (sir's call) instead of several shorter ones --
+            # retrying doesn't help if a big file genuinely needs more than
+            # 30s, it just fails twice at the same point instead of once.
             response = requests.post(
                 NVIDIA_API_URL,
                 headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
                 json=payload,
-                timeout=120,
+                timeout=60,
             )
         except requests.RequestException as exc:
             last_error = exc

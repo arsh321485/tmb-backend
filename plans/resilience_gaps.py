@@ -70,10 +70,6 @@ def find_resilience_gaps(resilience_map: dict, *, other_plans: list | None = Non
         name = svc.get("name") or "Unnamed service"
         if not svc.get("rto"):
             gaps.append({"service": name, "issue": "No RTO (recovery time objective) found for this service."})
-        if not svc.get("rpo"):
-            gaps.append({"service": name, "issue": "No RPO (recovery point objective) found for this service."})
-        if not svc.get("dependencies"):
-            gaps.append({"service": name, "issue": "No dependencies listed -- may be incomplete, worth double-checking."})
 
     for role in resilience_map.get("roles", []):
         if role.get("has_backup") is False:

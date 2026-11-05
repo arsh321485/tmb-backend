@@ -1,11 +1,10 @@
 """
 Phase 1 (Read) -- A10: turn an uploaded plan's real text into a real
-resilience map (services, dependencies, recovery objectives), using the
-NVIDIA model (plans/nvidia_client.py). This is richer than the existing
-structured_data (plans/ai_extraction.py, plans/structured_extraction.py)
-which only pulls flat RTO/RPO/contacts lists -- this is organized per
-service, with a source citation per field, matching what the aligned
-flow's A10-A12 steps need to show the admin.
+resilience map, using the NVIDIA model (plans/nvidia_client.py).
+
+Deliberately RTO-only (sir's call): per-service name + RTO + source
+quote, nothing else -- no owner, RPO, impact, roles, notification
+commitments, response teams or contacts.
 
 Falls back to None if the NVIDIA key isn't configured or the call
 fails -- never blocks a plan upload.
@@ -29,15 +28,9 @@ _SYSTEM_PROMPT = (
 )
 
 _PROMPT_TEMPLATE = """Read the document text below and extract every real business service \
-or process it describes, with its recovery objectives. Do not invent values -- omit a \
-field if the document doesn't state it. For every field you do fill in, quote the exact \
-sentence (or closest short phrase) it came from in "source".
-
-Also extract: every named role/position with responsibility during an incident (e.g. IT \
-Director, Crisis Manager, Incident Commander), noting whether the text names a backup or \
-deputy for that role; the document's own version date or last-reviewed date, if stated; \
-any response team rosters (named team with its members); and any named vendor, regulator \
-or other external contact with their role and contact details if given.
+or process it describes, with its Recovery Time Objective (RTO) only. Do not invent values \
+-- omit a service entirely if the document doesn't state an RTO for it. Quote the exact \
+sentence (or closest short phrase) the RTO came from in "source".
 
 Return a JSON object shaped exactly like this:
 
@@ -45,27 +38,9 @@ Return a JSON object shaped exactly like this:
   "services": [
     {{
       "name": "<service or process name>",
-      "owner": "<the person or team named as owning this process, if stated>",
-      "impact_if_disrupted": "<what the document says happens if this is disrupted, if stated>",
       "rto": "<recovery time objective, as written, e.g. \\"4 hours\\">",
-      "rpo": "<recovery point objective, as written>",
-      "minimum_service_level": "<if stated>",
-      "dependencies": ["<people, systems, sites or suppliers this service depends on>"],
       "source": "<the sentence or phrase this came from>"
     }}
-  ],
-  "notification_commitments": [
-    {{"who": "<regulator, customer, staff, etc.>", "deadline": "<e.g. \\"72 hours\\">", "source": "<quoted phrase>"}}
-  ],
-  "roles": [
-    {{"title": "<role/position name, e.g. \\"IT Director\\">", "person": "<name, if given>", "has_backup": <true if the text names a deputy/backup/alternate for this role, false if the role is named with no backup mentioned>, "source": "<quoted phrase>"}}
-  ],
-  "document_date": "<the document's own version date or last-reviewed date, as written, e.g. \\"October 2024\\" -- omit if not stated anywhere>",
-  "response_teams": [
-    {{"name": "<team name, e.g. \\"Crisis Response Team\\">", "members": ["<named members or roles>"], "source": "<quoted phrase>"}}
-  ],
-  "key_contacts": [
-    {{"name": "<vendor, regulator or stakeholder name>", "role": "<what they're the contact for>", "details": "<phone/email/other contact info if given>", "source": "<quoted phrase>"}}
   ]
 }}
 
@@ -77,10 +52,10 @@ Document text:
 
 def extract_resilience_map(text: str) -> dict | None:
     """
-    Returns {"services": [...], "notification_commitments": [...]} or
-    None if extraction isn't available/didn't work -- caller should
-    leave resilience_map unset and let the admin fill it in by hand
-    (A10-A12 still work without this, just with more manual typing).
+    Returns {"services": [{"name", "rto", "source"}, ...]} or None if
+    extraction isn't available/didn't work -- caller should leave
+    resilience_map unset and let the admin fill it in by hand (A10-A12
+    still work without this, just with more manual typing).
 
     Long documents are split into chunks and extracted separately, then
     merged -- a single call silently truncated anything past _MAX_CHARS
@@ -92,14 +67,7 @@ def extract_resilience_map(text: str) -> dict | None:
         return None
 
     chunks = _chunk_text(text, _MAX_CHARS)
-    merged: dict = {
-        "services": [],
-        "notification_commitments": [],
-        "roles": [],
-        "document_date": "",
-        "response_teams": [],
-        "key_contacts": [],
-    }
+    merged: dict = {"services": []}
     any_succeeded = False
 
     for chunk in chunks:
@@ -108,12 +76,6 @@ def extract_resilience_map(text: str) -> dict | None:
             continue
         any_succeeded = True
         merged["services"].extend(result.get("services", []))
-        merged["notification_commitments"].extend(result.get("notification_commitments", []))
-        merged["roles"].extend(result.get("roles", []))
-        merged["response_teams"].extend(result.get("response_teams", []))
-        merged["key_contacts"].extend(result.get("key_contacts", []))
-        if not merged["document_date"] and result.get("document_date"):
-            merged["document_date"] = result["document_date"]
 
     if not any_succeeded:
         return None
@@ -217,11 +179,6 @@ def _parse_json_response(raw_text: str) -> dict | None:
         return None
 
     data.setdefault("services", [])
-    data.setdefault("notification_commitments", [])
-    data.setdefault("roles", [])
-    data.setdefault("document_date", "")
-    data.setdefault("response_teams", [])
-    data.setdefault("key_contacts", [])
     _strip_placeholder_values(data)
     return data
 
@@ -235,7 +192,7 @@ _PLACEHOLDER_VALUES = {"not answerable", "not stated", "n/a", "na", "unknown", "
 
 
 def _strip_placeholder_values(data: dict) -> None:
-    for list_key in ("services", "roles", "response_teams", "key_contacts"):
+    for list_key in ("services",):
         for item in data.get(list_key, []):
             if not isinstance(item, dict):
                 continue

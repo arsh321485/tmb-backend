@@ -141,6 +141,15 @@ GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
 NVIDIA_API_KEY = config("NVIDIA_API_KEY", default="")
 NVIDIA_MODEL = config("NVIDIA_MODEL", default="nvidia/nemotron-3.5-bolt-e4b")
 
+# Pre-onboarding research crew (ir_onboarding_crew) -- a SEPARATE Python
+# project with its own venv and dependencies (CrewAI etc.), not installed
+# into this project. Only run as a subprocess from plans/draft_generation.py
+# ("No BCP, don't want GRC" path). Its own .env holds its own API keys.
+ONBOARDING_CREW_DIR = config(
+    "ONBOARDING_CREW_DIR",
+    default=r"C:\Users\DELL\Downloads\TMP\ir_onboarding_crew\ir_onboarding_crew",
+)
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

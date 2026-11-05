@@ -75,6 +75,57 @@ def _is_privacy_relevant(service: dict) -> bool:
     return any(kw in haystack for kw in _PRIVACY_KEYWORDS)
 
 
+def sector_research_context(team_id: str) -> str:
+    """
+    A10/A3 -- one line of real, sector-specific threat/regulator context
+    from the 6-agent research (plans/draft_generation.py's draft_research_items),
+    shown once at the top of Threat Profile. Separate from rank_threats'
+    per-threat RTO-driven "why" text below -- this is the sector-level
+    "what's actually hitting companies like yours, and who you answer
+    to" context the RTO numbers alone don't carry. Empty string if no
+    plan has this (a real uploaded document never does -- only an
+    ai_draft plan does, see plans/draft_generation.py).
+    """
+    from .models import Plan
+
+    plan = (
+        Plan.objects(slack_team_id=team_id, is_latest=True, draft_research_items__ne=[])
+        .order_by("-created_at")
+        .first()
+        if team_id
+        else None
+    )
+    if not plan:
+        return ""
+
+    items = {i.get("id"): i for i in (plan.draft_research_items or [])}
+
+    def _value_if_title_matches(item_id: str, title_keywords: tuple) -> str:
+        """The crew's own structural check only verifies every A1-A12/
+        B1-B7 id is present once -- not that each id's CONTENT actually
+        matches its own label. Confirmed live: one real run put A12's
+        "default tolerance bands" content under the A10 id. Guard
+        against showing a mislabeled item by sanity-checking its own
+        title before trusting its value."""
+        item = items.get(item_id) or {}
+        title = (item.get("title") or "").lower()
+        if not any(kw in title for kw in title_keywords):
+            return ""
+        return (item.get("value") or "").strip()
+
+    threat_landscape = _value_if_title_matches("A10", ("threat", "scenario"))
+    regulators = _value_if_title_matches("A3", ("regulat", "law", "framework"))
+    if not threat_landscape and not regulators:
+        return ""
+
+    parts = []
+    if threat_landscape and threat_landscape.lower() != "not found":
+        parts.append(f"Sector threat landscape: {threat_landscape[:280]}")
+    if regulators and regulators.lower() != "not found":
+        parts.append(f"Likely applicable regulators: {regulators[:200]}")
+    return "\n".join(parts)
+
+
 def rank_threats(team_id: str, base_threats: list[dict]) -> list[dict]:
     """
     Returns a copy of base_threats, re-sorted and with "why"/"default_crit"

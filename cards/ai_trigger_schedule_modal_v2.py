@@ -17,12 +17,12 @@ SLACK_API_BASE = "https://slack.com/api"
 CALLBACK_ID = "v2_ai_trigger_schedule_modal"
 
 
-def build_modal_view(scenario_id: str, channel_id: str = "") -> dict:
+def build_modal_view(scenario_id: str, channel_id: str = "", training_mode: bool = False) -> dict:
     now = datetime.datetime.utcnow()
     return {
         "type": "modal",
         "callback_id": CALLBACK_ID,
-        "private_metadata": json.dumps({"scenario_id": scenario_id, "channel_id": channel_id}),
+        "private_metadata": json.dumps({"scenario_id": scenario_id, "channel_id": channel_id, "training_mode": training_mode}),
         "title": {"type": "plain_text", "text": "Schedule this scenario"},
         "submit": {"type": "plain_text", "text": "Schedule"},
         "close": {"type": "plain_text", "text": "Cancel"},
@@ -43,11 +43,11 @@ def build_modal_view(scenario_id: str, channel_id: str = "") -> dict:
     }
 
 
-def open_modal(trigger_id: str, scenario_id: str, channel_id: str, bot_token: str) -> None:
+def open_modal(trigger_id: str, scenario_id: str, channel_id: str, bot_token: str, training_mode: bool = False) -> None:
     requests.post(
         f"{SLACK_API_BASE}/views.open",
         headers={"Authorization": f"Bearer {bot_token}"},
-        json={"trigger_id": trigger_id, "view": build_modal_view(scenario_id, channel_id)},
+        json={"trigger_id": trigger_id, "view": build_modal_view(scenario_id, channel_id, training_mode)},
         timeout=10,
     )
 
@@ -63,6 +63,7 @@ def handle_submission(payload: dict, bot_token: str) -> None:
         return
     scenario_id = meta.get("scenario_id", "")
     channel_id = meta.get("channel_id", "")
+    training_mode = bool(meta.get("training_mode", False))
     scenario = GeneratedScenario.objects(id=scenario_id).first() if scenario_id else None
     if not scenario:
         return
@@ -75,4 +76,7 @@ def handle_submission(payload: dict, bot_token: str) -> None:
 
     scheduled_at = datetime.datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
     current_user_id = payload.get("user", {}).get("id", "")
-    ai_drill_v2.start_run(scenario, "scheduled", current_user_id, bot_token, scheduled_at=scheduled_at, origin_channel_id=channel_id)
+    ai_drill_v2.start_run(
+        scenario, "scheduled", current_user_id, bot_token, scheduled_at=scheduled_at,
+        origin_channel_id=channel_id, training_mode=training_mode,
+    )

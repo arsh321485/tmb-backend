@@ -954,12 +954,12 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
                     "type": "button",
                     "text": {
                         "type": "plain_text",
-                        "text": "→ Continue — review my threats" if ready else f"Continue ({staffed}/{total} staffed)",
+                        "text": "→ Continue to Threat Profile",
                         "emoji": True,
                     },
-                    "action_id": "v2_teams_done",
+                    "action_id": "v2_teams_continue",
                     "value": "next",
-                    **({"style": "primary"} if ready else {}),
+                    "style": "primary",
                 }
             ],
         }
@@ -976,48 +976,3 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
     return {"blocks": blocks}
 
 
-def build_teams_done_card() -> dict:
-    """Short confirmation shown right after Configure Teams finishes, so
-    the admin knows what's next before the card jumps straight into
-    Threat Profile -- sir's call."""
-    return {
-        "blocks": [
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "text": ":tada: Teams configured", "emoji": True},
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "Every mandatory team has its roles staffed — you're ready to move on.",
-                },
-            },
-            {"type": "divider"},
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": ":white_check_mark:  *Teams* — _done_"},
-            },
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": ":arrow_right:  *Threat Profile* — up next"},
-            },
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": ":clipboard:  *Plan* — after that"},
-            },
-            {"type": "divider"},
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "→ Continue to Threat Profile", "emoji": True},
-                        "action_id": "v2_teams_confirm_continue",
-                        "value": "next",
-                        "style": "primary",
-                    }
-                ],
-            },
-        ]
-    }

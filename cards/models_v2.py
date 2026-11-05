@@ -34,6 +34,13 @@ class AdminSetup(me.Document):
     # {"cyber": "U0123", "privacy": "U0456"}
     module_admins = me.DictField(default=dict)
 
+    # Which modules this org actually uses (picked on the Admins screen,
+    # before assigning owners) -- e.g. ["cyber"] for an org with no
+    # privacy/compliance scope. "plans_bia" isn't in this list: every org
+    # needs someone owning the plan upload regardless of which modules
+    # they picked.
+    selected_modules = me.ListField(me.StringField(), default=lambda: ["cyber", "privacy"])
+
     # Threat Profile card's drill-down position -- which Module/
     # Criticality/Threat/Incident/Cause/Phase/Scenario tab is currently
     # open. Previously reconstructed purely by re-reading the Slack
@@ -54,6 +61,13 @@ class AdminSetup(me.Document):
     # their role) can push a fresh update to it without the admin having
     # to click anything to refresh.
     teams_card_location = me.DictField(default=dict)
+
+    # Where the Upload & Analysis card is currently sitting -- same idea
+    # as teams_card_location: a DM upload finishing (plans/intake.py's
+    # handle_dm_message_event, called from home_tab/views.py) pushes a
+    # fresh card here instead of the admin having to manually refresh to
+    # see a file that finished processing minutes ago.
+    bia_upload_card_location = me.DictField(default=dict)
 
     # The real dedicated "testmyplan-threats-center" channel -- created
     # once per workspace the first time /testmyplan threats runs, reused
@@ -108,6 +122,31 @@ class PendingOrgProfile(me.Document):
     created_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
     meta = {"collection": "pending_org_profiles", "strict": False}
+
+
+class DraftBiaRequest(me.Document):
+    """
+    "No BCP, don't want GRC" path -- client asked us to generate a draft
+    BIA/BCP instead of using the GRC Department option. org_name/website
+    come straight from the real OrgProfile (sir's call: already captured
+    at signup, never ask for it again inside Slack).
+
+    status "requested" is set the moment they ask, "completed" once a
+    real Plan exists from it, "failed" if the research subprocess
+    errored, timed out, or produced nothing usable -- see
+    plans/draft_generation.py. error_message is only set for "failed",
+    and is what the Slack screen shows instead of leaving the user
+    staring at "pending" forever with no explanation.
+    """
+
+    team_id = me.StringField(required=True, unique=True)
+    org_name = me.StringField(required=False)
+    website_url = me.StringField(required=False)
+    status = me.StringField(choices=("requested", "completed", "failed"), default="requested")
+    error_message = me.StringField(required=False)
+    requested_at = me.DateTimeField(default=datetime.datetime.utcnow)
+
+    meta = {"collection": "draft_bia_requests", "strict": False}
 
 
 class Team(me.Document):
@@ -177,6 +216,15 @@ class TeamMember(me.Document):
     # Roles owner as "left the workspace" for this role, so the recurring
     # leaver check never sends the same alert twice for the same person.
     leaver_notified = me.ListField(me.StringField(), default=list)
+
+    # {primary_slack_user_id: datetime} -- a primary who went quiet
+    # (not acknowledged, not declined) for ROLE_TIMEOUT_MINUTES, so
+    # their backup was auto-activated by the fast timeout check
+    # (cards/role_reminders_v2.py's check_backup_timeout_activation),
+    # same real activation as an explicit decline, just time-triggered
+    # instead of a click. Keyed separately from reminders_sent (the
+    # slower 24h/48h admin-escalation path) so the two never collide.
+    backup_timeout_activated = me.DictField(default=dict)
 
     updated_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
@@ -273,6 +321,10 @@ class AIExerciseRun(me.Document):
     scenario = me.ReferenceField(GeneratedScenario, required=True)
 
     trigger_type = me.StringField(required=False)  # "now" / "scheduled" / "surprise"
+    # Training mode (flowchart's Yes/No branch): True -> everyone got a
+    # real pre-notification DM before this run started. False -> sent
+    # directly, no warning, same as every run before this field existed.
+    training_mode = me.BooleanField(default=False)
     status = me.StringField(choices=(RUN_STATUS_SCHEDULED, RUN_STATUS_RUNNING, RUN_STATUS_COMPLETED), default=RUN_STATUS_SCHEDULED)
     scheduled_at = me.DateTimeField(required=False)
 

@@ -8,6 +8,22 @@ an accumulating form.
 from .threat_map_v2_data import _find_incident, _find_threat
 
 
+def _team_label_for_role(role: str) -> str:
+    """Which real team (T01, T02...) a role name belongs to, from the
+    same catalog Teams & Roles itself is built from -- so a reviewer can
+    see at a glance which team's member gets each question, same idea
+    as Threat Profile's "Continue to Configure Test" labels."""
+    from .team_catalog_v2 import ALL_TEAMS, ROLE_CATALOG_BY_TEAM
+
+    for team_id, team_roles in ROLE_CATALOG_BY_TEAM.items():
+        if any(r.get("role") == role for r in team_roles):
+            team = next((t for t in ALL_TEAMS if t["id"] == team_id), None)
+            if team:
+                return f"{team_id} ({team['name']})"
+            return team_id
+    return ""
+
+
 def _breadcrumb(module: str, threat_id: str, incident_id: str, cause_id: str) -> str:
     threat = _find_threat(module, threat_id)
     incident = _find_incident(module, threat_id, incident_id)
@@ -119,19 +135,26 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str) -> dict:
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ":white_check_mark: *Approved* -- ready to be used in a real drill."}]})
         blocks.append(
             {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "Training mode? (sends a heads-up DM to everyone involved before the test starts)"},
+            }
+        )
+        blocks.append(
+            {
                 "type": "actions",
                 "elements": [
-                    {"type": "button", "text": {"type": "plain_text", "text": "Trigger now", "emoji": True}, "action_id": "v2_ai_trigger_now", "value": str(scenario_doc.id), "style": "danger"},
-                    {"type": "button", "text": {"type": "plain_text", "text": "Schedule", "emoji": True}, "action_id": "v2_ai_trigger_schedule_open", "value": str(scenario_doc.id)},
-                    {"type": "button", "text": {"type": "plain_text", "text": "Surprise window", "emoji": True}, "action_id": "v2_ai_trigger_surprise", "value": str(scenario_doc.id)},
+                    {"type": "button", "text": {"type": "plain_text", "text": "Yes -- send pre-notification", "emoji": True}, "action_id": "v2_ai_training_yes", "value": str(scenario_doc.id), "style": "primary"},
+                    {"type": "button", "text": {"type": "plain_text", "text": "No -- send test directly", "emoji": True}, "action_id": "v2_ai_training_no", "value": str(scenario_doc.id)},
                 ],
             }
         )
     blocks.append({"type": "divider"})
 
     for inj in scenario_doc.injects:
+        role = inj.get("target_role", "?")
+        team_label = _team_label_for_role(role)
         lines = [f"*{inj.get('seq', '?')}. {inj.get('title', 'Untitled')}* — _{inj.get('phase', '')}_"]
-        lines.append(f"To: *{inj.get('target_role', '?')}*")
+        lines.append(f"To: *{role}*" + (f"  ·  _{team_label}_" if team_label else ""))
         lines.append(inj.get("inject_message", ""))
         lines.append(f"\n*Decision:* {inj.get('decision_question', '')}")
         for opt in inj.get("options", []):
@@ -142,10 +165,13 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str) -> dict:
     if scenario_doc.consequence_injects:
         blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "*Consequence injects (triggered by a Poor choice)*"}]})
         for inj in scenario_doc.consequence_injects:
+            role = inj.get("target_role", "?")
+            team_label = _team_label_for_role(role)
+            to_text = f"To: {role}" + (f"  ·  _{team_label}_" if team_label else "")
             blocks.append(
                 {
                     "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"*{inj.get('title', 'Untitled')}* — To: {inj.get('target_role', '?')}\n{inj.get('inject_message', '')}"},
+                    "text": {"type": "mrkdwn", "text": f"*{inj.get('title', 'Untitled')}* — {to_text}\n{inj.get('inject_message', '')}"},
                 }
             )
         blocks.append({"type": "divider"})

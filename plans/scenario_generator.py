@@ -96,8 +96,30 @@ def generate_scenario(team_id: str, threat_label: str, incident_name: str, cause
             if tm.primary_slack_user_ids:
                 roles.append(tm.role)
 
+    # Threat Profile (where this gets called from) now comes before Teams
+    # & Roles in the flow, so nobody may be staffed yet when a scenario
+    # is first generated. Fall back to the real Mandatory/Recommended
+    # role taxonomy (cards/team_catalog_v2.py -- the same catalog the
+    # Teams screen itself is built from, not invented) instead of
+    # blocking generation on staffing being done first. Whoever ends up
+    # actually assigned to a targeted role by the time this scenario is
+    # triggered is who gets the real DM (cards/ai_drill_v2.py resolves
+    # the recipient at trigger time, not at generation time) -- an
+    # unstaffed role at trigger time is skipped there already.
+    if not roles:
+        from cards.team_catalog_v2 import ALL_TEAMS, ROLE_CATALOG_BY_TEAM
+
+        mandatory_recommended_team_ids = {t["id"] for t in ALL_TEAMS if t["tier"] in ("Mandatory", "Recommended")}
+        roles = [
+            r["role"]
+            for team_id_, team_roles in ROLE_CATALOG_BY_TEAM.items()
+            if team_id_ in mandatory_recommended_team_ids
+            for r in team_roles
+            if r.get("priority") in ("Mandatory", "Recommended")
+        ]
+
     if not services or not roles:
-        logger.warning("No real plan services or assigned roles for team %s -- skipping scenario generation", team_id)
+        logger.warning("No real plan services or roles for team %s -- skipping scenario generation", team_id)
         return None
 
     services_block = "\n".join(

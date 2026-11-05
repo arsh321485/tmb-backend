@@ -241,10 +241,12 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
     "why" text, when a real plan exists for this workspace.
     """
     threats = THREATS
+    research_context = ""
     if team_id:
-        from plans.threat_ranking import rank_threats
+        from plans.threat_ranking import rank_threats, sector_research_context
 
         threats = rank_threats(team_id, THREATS)
+        research_context = sector_research_context(team_id)
 
     fixed_state = state.get("fixed", {})
     custom = state.get("custom", [])
@@ -282,6 +284,11 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
                 }
             ],
         },
+        *(
+            [{"type": "context", "elements": [{"type": "mrkdwn", "text": f":mag: {research_context}"}]}]
+            if research_context
+            else []
+        ),
         {
             "type": "section",
             "text": {
@@ -428,198 +435,50 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
                 selected_incident = next((inc for inc in incidents if inc["id"] == active_incident), None)
                 if selected_incident and selected_incident["causes"]:
                     causes = selected_incident["causes"]
+                    # Cause tabs removed from here (sir's call) -- Threat
+                    # Profile now stops at Incident; Cause gets picked on
+                    # Step 6 · Configure Test instead, same pattern
+                    # Phase/Scenario already use (auto-default here,
+                    # real picker lives in Configure Test).
                     active_cause = state.get("active_cause")
                     if not any(c["id"] == active_cause for c in causes):
-                        active_cause = None
-
-                    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`CAUSE`"}]})
-                    cause_tab_elements = [
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": c["name"], "emoji": True},
-                            "action_id": f"v2_threat_cause_tab__{c['id']}",
-                            "value": c["id"],
-                            **({"style": "primary"} if c["id"] == active_cause else {}),
-                        }
-                        for c in causes
-                    ]
-                    blocks.append({"type": "actions", "block_id": f"threatcause|{active_cause or ''}", "elements": cause_tab_elements})
+                        active_cause = causes[0]["id"] if causes else None
 
                     selected_cause = next((c for c in causes if c["id"] == active_cause), None)
                     if selected_cause:
-                        from .plan_catalog_v2 import find_plan_id_for_taxonomy, phases_for_plan, steps_for_phase
+                        from .plan_catalog_v2 import find_plan_id_for_taxonomy
 
-                        plan_id = find_plan_id_for_taxonomy(active_module, raw_key, selected_incident["id"], selected_cause["id"])
-                        if plan_id:
-                            phases = phases_for_plan(plan_id)
-
-                            # Sir's call: Phase/Scenario default to the first
-                            # one (Identification/Trigger) the FIRST time
-                            # this exact threat->incident->cause combo is
-                            # reached -- a repeat visit stays strict, no
-                            # auto-pick, same as every level above. "First
-                            # time" is tracked in Mongo (visited_combos),
-                            # not just read off the message, since the
-                            # message resets every reload.
-                            combo_key = f"{active_module}|{raw_key}|{selected_incident['id']}|{selected_cause['id']}"
-                            visited_combos = state.setdefault("visited_combos", set())
-                            first_visit = combo_key not in visited_combos
-                            if first_visit:
-                                visited_combos.add(combo_key)
-
-                            active_phase = state.get("active_phase")
-                            if active_phase not in phases:
-                                active_phase = phases[0] if (first_visit and phases) else None
-
-                            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`PHASE`"}]})
-                            phase_tab_elements = [
-                                {
-                                    "type": "button",
-                                    "text": {"type": "plain_text", "text": p, "emoji": True},
-                                    "action_id": f"v2_threat_phase_tab__{plan_id}__{p}",
-                                    "value": p,
-                                    **({"style": "primary"} if p == active_phase else {}),
-                                }
-                                for p in phases
-                            ]
-                            blocks.append({"type": "actions", "block_id": f"threatphase|{active_phase or ''}", "elements": phase_tab_elements})
-
-                            steps = steps_for_phase(plan_id, active_phase) if active_phase else []
-                            if steps:
-                                # Every scenario tab renders green now (all of
-                                # them run when this phase is triggered), so
-                                # there's no visual way to tell "selected" from
-                                # "not yet clicked" -- always default to the
-                                # first one so TestMyPlan/Trigger is available
-                                # the moment a phase is picked, not gated on an
-                                # explicit scenario click that no longer shows.
-                                active_scenario = state.get("active_scenario")
-                                if not any(s["scenario"] == active_scenario for s in steps):
-                                    active_scenario = steps[0]["scenario"]
-
-                                blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`SCENARIO`"}]})
-                                scenario_tab_elements = [
+                        # Review/Generate AI scenario buttons moved to
+                        # Step 6 · Configure Test (sir's call) -- that
+                        # screen now owns Cause too, so it's the one with
+                        # the real cause-specific plan_id to check against.
+                        blocks.append({"type": "divider"})
+                        blocks.append(
+                            {
+                                "type": "actions",
+                                "elements": [
                                     {
                                         "type": "button",
-                                        "text": {"type": "plain_text", "text": s["scenario"], "emoji": True},
-                                        "action_id": f"v2_threat_scenario_tab__{plan_id}__{active_phase}__{s['scenario']}",
-                                        "value": s["scenario"],
-                                        # All green once a phase is chosen -- Trigger now runs every
-                                        # scenario in the phase, not just whichever one you clicked
-                                        # last, so every scenario tab shows as included.
-                                        "style": "primary",
-                                    }
-                                    for s in steps
-                                ]
-                                blocks.append({"type": "actions", "block_id": f"threatscenario|{active_scenario or ''}", "elements": scenario_tab_elements})
-
-                                if active_scenario:
-                                    blocks.append({"type": "divider"})
-                                    trigger_row = [
-                                        {
-                                            "type": "button",
-                                            "text": {"type": "plain_text", "text": ":rotating_light: TestMyPlan", "emoji": True},
-                                            "action_id": "v2_threat_trigger",
-                                            "value": json.dumps(
-                                                {
-                                                    "plan_id": plan_id,
-                                                    "phase": active_phase,
-                                                    "scenario": active_scenario,
+                                        "text": {"type": "plain_text", "text": "TestMyPlan", "emoji": True},
+                                        "action_id": "v2_threat_configure_test",
+                                        "value": json.dumps(
+                                            {
+                                                "module": active_module,
+                                                "threat_key": raw_key,
+                                                "incident_id": selected_incident["id"],
+                                                "breadcrumb": {
                                                     "module": active_module,
                                                     "crit": active_crit,
                                                     "threat": active_item["label"],
                                                     "incident": selected_incident["name"],
-                                                    "cause": selected_cause["name"],
-                                                }
-                                            ),
-                                            "style": "danger",
-                                        }
-                                    ]
-
-                                    # Sir's call: even a cause with a fixed
-                                    # pre-built plan can ALSO get a fresh
-                                    # AI-written one from the org's real plan
-                                    # -- not a replacement for TestMyPlan
-                                    # above, just an extra real option next
-                                    # to it. Same "review before it's usable"
-                                    # gate as every other AI-generated one.
-                                    from .models_v2 import GeneratedScenario
-
-                                    existing = None
-                                    if team_id:
-                                        existing = GeneratedScenario.objects(
-                                            team_id=team_id, module=active_module, threat_id=raw_key,
-                                            incident_id=selected_incident["id"], cause_id=selected_cause["id"],
-                                        ).order_by("-created_at").first()
-
-                                    if existing:
-                                        review_label = ":white_check_mark: Review approved AI scenario" if existing.status == "approved" else ":mag: Review AI scenario"
-                                        trigger_row.append(
-                                            {
-                                                "type": "button",
-                                                "text": {"type": "plain_text", "text": review_label, "emoji": True},
-                                                "action_id": "v2_threat_scenario_review",
-                                                "value": str(existing.id),
+                                                },
                                             }
-                                        )
-                                    else:
-                                        trigger_row.append(
-                                            {
-                                                "type": "button",
-                                                "text": {"type": "plain_text", "text": ":sparkles: Generate real scenario with AI", "emoji": True},
-                                                "action_id": "v2_threat_scenario_generate",
-                                                "value": f"{active_module}|{raw_key}|{selected_incident['id']}|{selected_cause['id']}",
-                                            }
-                                        )
-                                    blocks.append({"type": "actions", "elements": trigger_row})
-                        else:
-                            # A22 -- every cause except the one hand-written
-                            # ransomware plan_id lands here with nothing
-                            # real to run. Instead of a dead end, offer to
-                            # have the AI write a real scenario for this
-                            # exact Threat -> Incident -> Cause, from this
-                            # workspace's own plan and assigned roles.
-                            from .models_v2 import GeneratedScenario
-
-                            existing = None
-                            if team_id:
-                                existing = GeneratedScenario.objects(
-                                    team_id=team_id, module=active_module, threat_id=raw_key,
-                                    incident_id=selected_incident["id"], cause_id=selected_cause["id"],
-                                ).order_by("-created_at").first()
-
-                            if existing:
-                                status_text = ":white_check_mark: *AI scenario approved* -- ready to run." if existing.status == "approved" else ":memo: *AI scenario written* -- needs review and approval."
-                                blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": status_text}]})
-                                blocks.append(
-                                    {
-                                        "type": "actions",
-                                        "elements": [
-                                            {
-                                                "type": "button",
-                                                "text": {"type": "plain_text", "text": ":mag: Review AI scenario", "emoji": True},
-                                                "action_id": "v2_threat_scenario_review",
-                                                "value": str(existing.id),
-                                                "style": "primary",
-                                            }
-                                        ],
+                                        ),
+                                        "style": "danger",
                                     }
-                                )
-                            else:
-                                blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No real test plan mapped for this cause yet._"}]})
-                                blocks.append(
-                                    {
-                                        "type": "actions",
-                                        "elements": [
-                                            {
-                                                "type": "button",
-                                                "text": {"type": "plain_text", "text": ":sparkles: Generate real scenario with AI", "emoji": True},
-                                                "action_id": "v2_threat_scenario_generate",
-                                                "value": f"{active_module}|{raw_key}|{selected_incident['id']}|{selected_cause['id']}",
-                                            }
-                                        ],
-                                    }
-                                )
+                                ],
+                            }
+                        )
             elif not active_item["custom"]:
                 blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No incidents mapped for this threat yet._"}]})
 

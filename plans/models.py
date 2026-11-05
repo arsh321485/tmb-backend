@@ -61,6 +61,17 @@ class Plan(me.Document):
     resilience_map = me.DictField(required=False)
     resilience_map_status = me.StringField(required=False, default="")
 
+    # "upload" (default -- a real client document) or "ai_draft" (the
+    # "No BCP, don't want GRC" path -- plans/draft_generation.py). An
+    # ai_draft plan must go through the confirmation questions
+    # (cards/draft_confirmation_modal_v2.py) before it counts as approved,
+    # since nothing in it has been confirmed by the client yet.
+    generation_source = me.StringField(required=False, default="upload", choices=("upload", "ai_draft"))
+    # The ir_onboarding_crew's draft_context_profile.json items, kept
+    # for the confirmation modal's "research summary" section -- only
+    # set when generation_source == "ai_draft".
+    draft_research_items = me.ListField(me.DictField(), default=list)
+
     # A11 -- which flagged gaps (plans/resilience_gaps.py) the Plans &
     # BIA owner has accepted/acknowledged. Stored as the gap's own
     # "<service>|<issue>" text so it's stable even if the map is

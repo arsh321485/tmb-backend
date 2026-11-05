@@ -149,18 +149,14 @@ def build_card(plan) -> dict:
         blocks.append({"type": "divider"})
 
     if status != "approved" and services:
+        # Confirm button removed (sir's call) -- Command Center's own
+        # Approve button (cards/bia_upload_v2_data.py's "Upload &
+        # Analysis" screen) is now the single real place this gets
+        # approved, so this DM doesn't need its own separate confirm step.
         blocks.append(
             {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "✅ Confirm this resilience map", "emoji": True},
-                        "action_id": "resmap_confirm",
-                        "value": str(plan.id),
-                        "style": "primary",
-                    }
-                ],
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "*:point_right: Review and approve this on the Command Center screen.*"},
             }
         )
     elif status == "approved":

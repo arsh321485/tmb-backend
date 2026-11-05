@@ -66,12 +66,19 @@ def save_visited_combos(team_id: str, combos: set) -> None:
 def load_admins_state(team_id: str) -> dict:
     setup = AdminSetup.objects(team_id=team_id).first()
     assigned = dict(setup.module_admins) if setup else {}
-    return {"assigned": assigned, "expanded": None, "delegate_pick": None}
+    selected_modules = list(setup.selected_modules) if setup else ["cyber", "privacy"]
+    return {"assigned": assigned, "expanded": None, "delegate_pick": None, "selected_modules": selected_modules}
 
 
 def save_admins_state(team_id: str, assigned: dict) -> None:
     setup = _get_or_create(team_id)
     setup.module_admins = dict(assigned)
+    setup.save()
+
+
+def save_selected_modules(team_id: str, selected_modules: list) -> None:
+    setup = _get_or_create(team_id)
+    setup.selected_modules = list(selected_modules)
     setup.save()
 
 
@@ -173,6 +180,19 @@ def save_teams_card_location(team_id: str, channel_id: str, message_ts: str) -> 
 def load_teams_card_location(team_id: str) -> dict:
     setup = AdminSetup.objects(team_id=team_id).first()
     return dict(setup.teams_card_location) if setup and setup.teams_card_location else {}
+
+
+def save_bia_upload_card_location(team_id: str, channel_id: str, message_ts: str) -> None:
+    if not (channel_id and message_ts):
+        return
+    setup = _get_or_create(team_id)
+    setup.bia_upload_card_location = {"channel_id": channel_id, "message_ts": message_ts}
+    setup.save()
+
+
+def load_bia_upload_card_location(team_id: str) -> dict:
+    setup = AdminSetup.objects(team_id=team_id).first()
+    return dict(setup.bia_upload_card_location) if setup and setup.bia_upload_card_location else {}
 
 
 def load_dm_statuses(team_id: str) -> dict:

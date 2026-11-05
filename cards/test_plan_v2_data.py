@@ -55,6 +55,224 @@ def _resolve_step_assignment(step: dict, slack_team_id: str, bot_token: str) -> 
     return "\n\n".join(lines)
 
 
+def build_configure_test_card(
+    module: str, threat_key: str, incident_id: str, active_cause: str,
+    active_phase: str, active_scenario: str, breadcrumb: dict, team_id: str = "",
+) -> dict:
+    """
+    Cause/Phase/Scenario picker for a pre-built plan -- moved here from
+    the Threat Profile card (sir's call): Threat Profile now stops at
+    Incident, Cause/Phase/Scenario all get chosen here before Triggering.
+    Cause determines which real plan_id applies (plan_catalog_v2's
+    taxonomy is keyed by module+threat+incident+cause), so it's resolved
+    first, then Phase/Scenario as before. All three tab rows stay
+    visible together, same as Phase+Scenario already did.
+    """
+    from .threat_map_v2_data import _find_threat
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": ":clipboard: Step 6 · Configure test", "emoji": True}},
+    ]
+
+    taxonomy_threat = _find_threat(module, threat_key) if module and threat_key else None
+    incident = next((i for i in (taxonomy_threat or {}).get("incidents", []) if i["id"] == incident_id), None)
+    causes = incident["causes"] if incident else []
+    # Strict step-by-step disclosure (sir's call, same as Threat Profile
+    # above it) -- no auto-picking "the first one"; nothing shows as
+    # selected, and nothing below Cause renders, until the admin
+    # actually clicks it.
+    if not any(c["id"] == active_cause for c in causes):
+        active_cause = ""
+    selected_cause = next((c for c in causes if c["id"] == active_cause), None)
+
+    crumb = dict(breadcrumb)
+    if selected_cause:
+        crumb["cause"] = selected_cause["name"]
+    crumb_text = "  ›  ".join(f"*{crumb[k]}*" for k in ("module", "crit", "threat", "incident", "cause") if crumb.get(k))
+    if crumb_text:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f":round_pushpin: {crumb_text}"}})
+        blocks.append({"type": "divider"})
+
+    def _cfg_value(**overrides) -> str:
+        payload = {
+            "module": module, "threat_key": threat_key, "incident_id": incident_id,
+            "cause": active_cause, "phase": active_phase, "scenario": active_scenario,
+            "breadcrumb": breadcrumb,
+        }
+        payload.update(overrides)
+        return json.dumps(payload)
+
+    if causes:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`CAUSE`"}]})
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": c["name"], "emoji": True},
+                        "action_id": f"v2_cfgtest_cause_tab__{c['id']}",
+                        "value": _cfg_value(cause=c["id"], phase="", scenario=""),
+                        **({"style": "primary"} if c["id"] == active_cause else {}),
+                    }
+                    for c in causes
+                ],
+            }
+        )
+
+    if not selected_cause:
+        return {"blocks": blocks}
+
+    # Awareness content now shown as a real popup (sir's call) --
+    # see cards/cause_awareness_modal_v2.py, opened by the handler for
+    # v2_cfgtest_cause_tab__ right when the cause is clicked, not as
+    # text stuffed into this screen.
+
+    from .plan_catalog_v2 import find_plan_id_for_taxonomy, phases_for_plan, steps_for_phase
+
+    plan_id = find_plan_id_for_taxonomy(module, threat_key, incident_id, active_cause)
+
+    # A22 -- every cause except the ones with a hand-written plan lands
+    # here with nothing real to run. Instead of a dead end, offer to
+    # have the AI write a real scenario for this exact
+    # Threat -> Incident -> Cause, from this workspace's own plan and
+    # assigned roles. Moved here from Threat Profile (sir's call) since
+    # this screen now owns Cause -- it's the one with the real
+    # cause-specific plan_id (or lack of one) to check against.
+    from .models_v2 import GeneratedScenario
+
+    existing = None
+    if team_id:
+        existing = GeneratedScenario.objects(
+            team_id=team_id, module=module, threat_id=threat_key,
+            incident_id=incident_id, cause_id=active_cause,
+        ).order_by("-created_at").first()
+
+    if not plan_id:
+        if existing:
+            status_text = ":white_check_mark: *AI scenario approved* -- ready to run." if existing.status == "approved" else ":memo: *AI scenario written* -- needs review and approval."
+            review_label = ":white_check_mark: Review approved AI scenario" if existing.status == "approved" else ":mag: Review AI scenario"
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": status_text}]})
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": review_label, "emoji": True},
+                            "action_id": "v2_threat_scenario_review",
+                            "value": str(existing.id),
+                            "style": "primary",
+                        }
+                    ],
+                }
+            )
+        else:
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No pre-built plan for this cause yet._"}]})
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": ":sparkles: Generate real scenario with AI", "emoji": True},
+                            "action_id": "v2_threat_scenario_generate",
+                            "value": f"{module}|{threat_key}|{incident_id}|{active_cause}",
+                        }
+                    ],
+                }
+            )
+        return {"blocks": blocks}
+
+    phases = phases_for_plan(plan_id)
+    if active_phase not in phases:
+        active_phase = ""
+
+    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`PHASE`"}]})
+    blocks.append(
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": p, "emoji": True},
+                    "action_id": f"v2_cfgtest_phase_tab__{idx}",
+                    "value": _cfg_value(phase=p, scenario=""),
+                    **({"style": "primary"} if p == active_phase else {}),
+                }
+                for idx, p in enumerate(phases)
+            ],
+        }
+    )
+
+    if not active_phase:
+        return {"blocks": blocks}
+
+    steps = steps_for_phase(plan_id, active_phase)
+    if not steps:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "_No scenarios in this phase._"}})
+        return {"blocks": blocks}
+
+    if active_scenario not in {s["scenario"] for s in steps}:
+        active_scenario = steps[0]["scenario"]
+
+    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`SCENARIO`"}]})
+    blocks.append(
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": s["scenario"], "emoji": True},
+                    "action_id": f"v2_cfgtest_scenario_tab__{idx}",
+                    "value": _cfg_value(scenario=s["scenario"]),
+                    # All green, same as the old inline picker -- Trigger
+                    # runs every scenario in the phase, not just the last one clicked.
+                    "style": "primary",
+                }
+                for idx, s in enumerate(steps)
+            ],
+        }
+    )
+
+    blocks.append({"type": "divider"})
+    trigger_row = [
+        {
+            "type": "button",
+            "text": {"type": "plain_text", "text": ":rotating_light: Launch test", "emoji": True},
+            "action_id": "v2_threat_trigger",
+            "value": json.dumps({"plan_id": plan_id, "phase": active_phase, "scenario": active_scenario, **crumb}),
+            "style": "danger",
+        }
+    ]
+    # Sir's call: even a cause with a fixed pre-built plan can ALSO get
+    # a fresh AI-written one from the org's real plan -- not a
+    # replacement for the plan above, just an extra real option next to
+    # it. Same "review before it's usable" gate as every other
+    # AI-generated one.
+    if existing:
+        review_label = ":white_check_mark: Review approved AI scenario" if existing.status == "approved" else ":mag: Review AI scenario"
+        trigger_row.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": review_label, "emoji": True},
+                "action_id": "v2_threat_scenario_review",
+                "value": str(existing.id),
+            }
+        )
+    else:
+        trigger_row.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": ":sparkles: Generate real scenario with AI", "emoji": True},
+                "action_id": "v2_threat_scenario_generate",
+                "value": f"{module}|{threat_key}|{incident_id}|{active_cause}",
+            }
+        )
+    blocks.append({"type": "actions", "elements": trigger_row})
+    return {"blocks": blocks}
+
+
 def build_real_test_plan_card(
     plan_id: str, active_phase: str, active_scenario: str, breadcrumb: dict | None = None,
     slack_team_id: str = "", bot_token: str = "",
@@ -93,7 +311,7 @@ def build_real_test_plan_card(
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f":large_blue_circle: *{current_step['scenario']}*\n{current_step['teams']} ({current_step['roles']})"},
+                "text": {"type": "mrkdwn", "text": f":large_blue_circle: *{current_step['scenario']}*"},
             }
         )
 
@@ -141,7 +359,7 @@ def build_real_test_plan_card(
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": ":rocket: Launch test", "emoji": True},
+                    "text": {"type": "plain_text", "text": ":rocket: TestMyPlan", "emoji": True},
                     "action_id": "v2_plan_arm_real",
                     "value": f"{plan_id}:{active_phase}:{active_scenario}",
                     "style": "danger",
@@ -278,7 +496,7 @@ def build_test_plan_card(module: str, scenario: str) -> dict:
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": ":rocket: Launch test", "emoji": True},
+                    "text": {"type": "plain_text", "text": ":rocket: TestMyPlan", "emoji": True},
                     "action_id": "v2_plan_arm",
                     "value": f"{module}:{scenario}",
                     "style": "danger",

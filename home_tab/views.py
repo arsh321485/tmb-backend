@@ -20,6 +20,33 @@ from .models import ProcessedSlackEvent
 logger = logging.getLogger(__name__)
 
 
+def _handle_dm_message_then_refresh_wizard(event: dict, team_id: str, bot_token: str) -> None:
+    """
+    Wraps plans.intake.handle_dm_message_event (unmodified) so a DM
+    upload finishing also pushes a fresh Upload & Analysis card to the
+    new wizard, instead of the admin having to manually re-click
+    "Check again" to see a file that finished processing minutes ago.
+    Lives here, not in plans/intake.py, so that file stays untouched.
+    """
+    handle_dm_message_event(event, team_id, bot_token)
+
+    try:
+        from cards.bia_upload_v2_data import build_bia_upload_card
+        from cards.nav_v2 import with_nav_bar_v2
+        from cards.persistence_v2 import load_bia_upload_card_location
+        from cards.slack_client import SlackApiError, _call
+
+        location = load_bia_upload_card_location(team_id)
+        channel_id, message_ts = location.get("channel_id", ""), location.get("message_ts", "")
+        if channel_id and message_ts:
+            card = with_nav_bar_v2(build_bia_upload_card(team_id), "bia_upload")
+            _call("chat.update", bot_token, channel=channel_id, ts=message_ts, **card)
+    except SlackApiError:
+        logger.exception("Couldn't refresh Upload & Analysis card after a DM upload for team %s", team_id)
+    except Exception:
+        logger.exception("Unexpected error refreshing Upload & Analysis card for team %s", team_id)
+
+
 @csrf_exempt
 @require_POST
 def slack_events(request):
@@ -82,7 +109,7 @@ def slack_events(request):
             # fire-and-forget fix as cards/views.py uses for
             # interactivity.
             threading.Thread(
-                target=handle_dm_message_event, args=(event, team_id, bot_token), daemon=True
+                target=_handle_dm_message_then_refresh_wizard, args=(event, team_id, bot_token), daemon=True
             ).start()
 
     # Slack only cares that we returned 200 quickly; the real work above

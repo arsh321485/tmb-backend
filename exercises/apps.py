@@ -33,7 +33,7 @@ class ExercisesConfig(AppConfig):
             # the Mongo connection) has finished setting up.
             from .drill import escalate_overdue_tasks, fire_due_scheduled_exercises
             from cards.inject_drill_v2 import escalate_overdue_decisions
-            from cards.role_reminders_v2 import check_role_reminders, check_leavers
+            from cards.role_reminders_v2 import check_backup_timeout_activation, check_role_reminders, check_leavers
             from cards.ai_drill_v2 import check_scheduled_ai_runs
 
             while True:
@@ -65,6 +65,13 @@ class ExercisesConfig(AppConfig):
                         logger.info("Sent %d role reminder/escalation message(s)", reminders_count)
                 except Exception:
                     logger.exception("Role reminder check failed")
+
+                try:
+                    backup_activated_count = check_backup_timeout_activation()
+                    if backup_activated_count:
+                        logger.info("Activated %d backup(s) after primary timeout", backup_activated_count)
+                except Exception:
+                    logger.exception("Backup timeout activation check failed")
 
                 try:
                     leaver_count = check_leavers()

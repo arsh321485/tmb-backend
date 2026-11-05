@@ -20,6 +20,11 @@ MODULE_ADMINS = [
     # (workspaces.models.get_first_admin) instead of a 4th assignable role.
 ]
 
+# Which of MODULE_ADMINS the admin can actually turn off -- "plans_bia"
+# isn't a toggle: every org needs someone owning the plan upload
+# regardless of which modules they picked.
+TOGGLEABLE_MODULES = ["cyber", "privacy"]
+
 
 def _select_option(value: str, label: str) -> dict:
     return {"text": {"type": "plain_text", "text": label}, "value": value}
@@ -27,11 +32,12 @@ def _select_option(value: str, label: str) -> dict:
 
 def read_current_state(message_blocks: list) -> dict:
     """
-    Reconstructs {"assigned": {module_id: slack_user_id}, "expanded": module_id|None}
-    from the message Slack just sent us.
+    Reconstructs {"assigned": {module_id: slack_user_id}, "expanded": module_id|None,
+    "selected_modules": [module_id, ...]} from the message Slack just sent us.
     """
     assigned = {}
     expanded = None
+    selected_modules = []
 
     for block in message_blocks or []:
         block_id = block.get("block_id", "")
@@ -42,8 +48,12 @@ def read_current_state(message_blocks: list) -> dict:
                 assigned[mod_id] = code
         elif block_id.startswith("adminexpand_"):
             expanded = block_id.removeprefix("adminexpand_")
+        elif block_id == "admin_module_toggle":
+            accessory = block.get("accessory") or {}
+            if accessory.get("type") == "checkboxes":
+                selected_modules = [opt["value"] for opt in accessory.get("initial_options", [])]
 
-    return {"assigned": assigned, "expanded": expanded}
+    return {"assigned": assigned, "expanded": expanded, "selected_modules": selected_modules}
 
 
 def _admin_row(mod: dict, assigned_code: str | None, expanded: str | None, people: list, by_code: dict, current_user_id: str) -> list:
@@ -166,74 +176,46 @@ def _admin_row(mod: dict, assigned_code: str | None, expanded: str | None, peopl
 
 
 def build_admins_card(state: dict, people: list, current_user_id: str) -> dict:
-    assigned = state.get("assigned", {})
-    expanded = state.get("expanded")
-    by_code = {p["i"]: p for p in people}
-
-    n_set = len(assigned)
-    total = len(MODULE_ADMINS)
-    all_set = n_set == total
+    selected_modules = state.get("selected_modules") or ["cyber", "privacy"]
 
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":busts_in_silhouette: Step 1 · Module admins", "emoji": True}},
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f":large_green_circle: *{n_set} / {total} set*"}],
-        },
+        {"type": "header", "text": {"type": "plain_text", "text": ":gear: Step 1 · Select modules", "emoji": True}},
         {
             "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": (
-                    f"Your confirmed threats span {total} modules, and each one needs an admin who owns "
-                    "its plans and tests. Take a module yourself, or hand it to a colleague — you stay the "
-                    "account owner either way."
+            "block_id": "admin_module_toggle",
+            "text": {"type": "mrkdwn", "text": "*Which modules does your org need?* Turn off anything that doesn't apply — you can change this later."},
+            "accessory": {
+                "type": "checkboxes",
+                "action_id": "v2_admin_toggle_modules",
+                "options": [
+                    {"text": {"type": "plain_text", "text": mod["m"]}, "value": mod["id"]}
+                    for mod in MODULE_ADMINS if mod["id"] in TOGGLEABLE_MODULES
+                ],
+                **(
+                    {
+                        "initial_options": [
+                            {"text": {"type": "plain_text", "text": mod["m"]}, "value": mod["id"]}
+                            for mod in MODULE_ADMINS if mod["id"] in TOGGLEABLE_MODULES and mod["id"] in selected_modules
+                        ]
+                    }
+                    if any(mod["id"] in selected_modules for mod in MODULE_ADMINS if mod["id"] in TOGGLEABLE_MODULES)
+                    else {}
                 ),
             },
         },
-    ]
-
-    if not all_set:
-        blocks.append(
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "I'll run every module myself", "emoji": True},
-                        "action_id": "v2_admin_take_all",
-                        "value": "all",
-                    }
-                ],
-            }
-        )
-
-    blocks.append({"type": "divider"})
-    for mod in MODULE_ADMINS:
-        blocks.extend(_admin_row(mod, assigned.get(mod["id"]), expanded, people, by_code, current_user_id))
-        blocks.append({"type": "divider"})
-
-    blocks.append(
+        {"type": "divider"},
         {
             "type": "actions",
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "→ Continue — set up response teams", "emoji": True},
+                    "text": {"type": "plain_text", "text": "→ Continue", "emoji": True},
                     "action_id": "v2_admins_done",
                     "value": "next",
-                    **({"style": "primary"} if all_set else {}),
+                    "style": "primary",
                 }
             ],
-        }
-    )
-    blocks.append(
-        {
-            "type": "context",
-            "elements": [
-                {"type": "mrkdwn", "text": "One person can hold every module. Admins can be changed at any time from this channel."}
-            ],
-        }
-    )
+        },
+    ]
 
     return {"blocks": blocks}

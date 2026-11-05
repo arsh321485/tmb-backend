@@ -4,6 +4,59 @@ demo only ever shows the "live" state cosmetically, no real Exercise/
 channel is created (that's real backend work, separate from this
 design-review demo)."""
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def build_training_mode_card(module: str, scenario: str) -> dict:
+    """New first step before Trigger (flowchart's "Training mode?" box) --
+    Yes sends a real pre-notification DM to every real team member who
+    could be drilled, before Trigger now/Schedule/Surprise are even
+    shown; No skips straight to Trigger, same as this screen always
+    worked before this existed."""
+    return {
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": ":zap: Step 7 · Trigger", "emoji": True}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": "Training mode? (sends a heads-up DM to everyone on the team before the test starts)"}},
+            {
+                "type": "actions",
+                "elements": [
+                    {"type": "button", "text": {"type": "plain_text", "text": "Yes -- send pre-notification", "emoji": True}, "action_id": "v2_trigger_training_yes", "value": f"{module}:{scenario}", "style": "primary"},
+                    {"type": "button", "text": {"type": "plain_text", "text": "No -- send test directly", "emoji": True}, "action_id": "v2_trigger_training_no", "value": f"{module}:{scenario}"},
+                ],
+            },
+        ]
+    }
+
+
+def send_pre_notification(team_id: str, module: str, scenario: str, bot_token: str) -> int:
+    """Real heads-up DM to every real person staffed on any team for this
+    workspace -- same Team/TeamMember data exercises/drill.py's real
+    fire_exercise() reads (read-only reuse, that file itself untouched).
+    Returns how many people were actually reached."""
+    from cards.models_v2 import Team, TeamMember
+    from cards.slack_client import SlackApiError, _call
+
+    sent_to = set()
+    for team_doc in Team.objects(team_id=team_id):
+        for tm in TeamMember.objects(team=team_doc):
+            recipient = tm.primary_slack_user_ids[0] if tm.primary_slack_user_ids else ""
+            if not recipient or recipient in sent_to:
+                continue
+            try:
+                opened = _call("conversations.open", bot_token, users=recipient)
+                dm_channel_id = opened["channel"]["id"]
+                _call(
+                    "chat.postMessage", bot_token, channel=dm_channel_id,
+                    text=f":bell: Heads up -- a TestMyPlan drill ({scenario}) will run soon.",
+                )
+                sent_to.add(recipient)
+            except SlackApiError:
+                logger.exception("Trigger %s/%s: failed to send pre-notification to %s", module, scenario, recipient)
+    return len(sent_to)
+
+
 TRIGGERS = [
     ("now", "Trigger now", "Launch immediately — teams are notified in their channel"),
     ("sched", "Schedule", "Pick a window; participants get a calendar hold"),

@@ -15,6 +15,75 @@ logger = logging.getLogger(__name__)
 
 REMINDER_STAGES = (24, 48)
 
+# Sir's call -- a PRIMARY who hasn't acknowledged or declined within this
+# many minutes of the Welcome DM going out gets their backup activated
+# automatically, same real activation as clicking "I can't cover this
+# role" (role_welcome_v2.send_backup_activation_dm), just time-triggered.
+# Deliberately much faster than the 24h/48h REMINDER_STAGES above, which
+# is a separate, slower "alert the admin" path for total silence.
+BACKUP_TIMEOUT_MINUTES = 20
+
+
+def check_backup_timeout_activation() -> int:
+    """
+    For every PRIMARY a Welcome DM was sent to who hasn't acknowledged or
+    declined within BACKUP_TIMEOUT_MINUTES, activates their real backup
+    (same DM a decline sends) and marks it so this never fires twice for
+    the same person. Returns how many backups were activated, for logging.
+    """
+    from . import role_welcome_v2
+    from .team_catalog_v2 import find_team
+    from workspaces.models import get_bot_token
+
+    now = datetime.datetime.utcnow()
+    activated_count = 0
+
+    for tm in TeamMember.objects():
+        pending_primaries = [
+            uid
+            for uid in tm.primary_slack_user_ids
+            if (tm.dm_status or {}).get(uid) == "sent"
+            and uid not in (tm.acknowledged_by or {})
+            and uid not in (tm.declined_by or {})
+            and uid not in (tm.backup_timeout_activated or {})
+        ]
+        if not pending_primaries:
+            continue
+
+        team_doc = tm.team
+        if not isinstance(team_doc, Team):
+            team_doc = Team.objects(id=tm.team.id).first()
+        if not team_doc:
+            continue
+
+        bot_token = get_bot_token(team_doc.team_id)
+        if not bot_token:
+            continue
+
+        team_info = find_team(team_doc.slug)
+        team_name = team_info["name"] if team_info else team_doc.name
+
+        changed = False
+        for uid in pending_primaries:
+            sent_at = tm.dm_sent_at.get(uid)
+            if not sent_at:
+                continue
+            elapsed_minutes = (now - sent_at).total_seconds() / 60
+            if elapsed_minutes < BACKUP_TIMEOUT_MINUTES:
+                continue
+
+            backup_ids = [b for b in tm.backup_slack_user_ids if b != uid]
+            if backup_ids:
+                role_welcome_v2.send_backup_activation_dm(backup_ids[0], team_doc.slug, team_name, tm.role, bot_token)
+            tm.backup_timeout_activated[uid] = now
+            activated_count += 1
+            changed = True
+
+        if changed:
+            tm.save()
+
+    return activated_count
+
 
 def check_role_reminders() -> int:
     """

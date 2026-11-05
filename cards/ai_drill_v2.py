@@ -33,22 +33,69 @@ def _resolve_recipient(team_id: str, role: str) -> str | None:
 
 
 def build_trigger_picker_card(scenario: GeneratedScenario) -> dict:
+    """First real step after Approve (flowchart's "Training mode?" box):
+    Yes sends everyone a real pre-notification DM before anything else
+    happens; No skips straight to the Trigger/Schedule/Surprise picker,
+    same as the drill always worked before this existed."""
     breadcrumb = f"{scenario.threat_label}  ›  {scenario.incident_name}  ›  {scenario.cause_name}"
     return {
         "blocks": [
             {"type": "header", "text": {"type": "plain_text", "text": ":white_check_mark: Approved -- ready to run", "emoji": True}},
             {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_"}]},
-            {"type": "section", "text": {"type": "mrkdwn", "text": "Choose when to run this scenario for real."}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": "Training mode? (sends a heads-up DM to everyone involved before the test starts)"}},
             {
                 "type": "actions",
                 "elements": [
-                    {"type": "button", "text": {"type": "plain_text", "text": "Trigger now", "emoji": True}, "action_id": "v2_ai_trigger_now", "value": str(scenario.id), "style": "danger"},
-                    {"type": "button", "text": {"type": "plain_text", "text": "Schedule", "emoji": True}, "action_id": "v2_ai_trigger_schedule_open", "value": str(scenario.id)},
-                    {"type": "button", "text": {"type": "plain_text", "text": "Surprise window", "emoji": True}, "action_id": "v2_ai_trigger_surprise", "value": str(scenario.id)},
+                    {"type": "button", "text": {"type": "plain_text", "text": "Yes -- send pre-notification", "emoji": True}, "action_id": "v2_ai_training_yes", "value": str(scenario.id), "style": "primary"},
+                    {"type": "button", "text": {"type": "plain_text", "text": "No -- send test directly", "emoji": True}, "action_id": "v2_ai_training_no", "value": str(scenario.id)},
                 ],
             },
         ]
     }
+
+
+def build_timing_picker_card(scenario: GeneratedScenario, training_mode: bool) -> dict:
+    breadcrumb = f"{scenario.threat_label}  ›  {scenario.incident_name}  ›  {scenario.cause_name}"
+    mode_note = ":white_check_mark: Pre-notification sent." if training_mode else "Sending directly -- no advance warning."
+    return {
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": ":dart: Choose when to run", "emoji": True}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_  ·  {mode_note}"}]},
+            {"type": "section", "text": {"type": "mrkdwn", "text": "Choose when to run this scenario for real."}},
+            {
+                "type": "actions",
+                "elements": [
+                    {"type": "button", "text": {"type": "plain_text", "text": "Trigger now", "emoji": True}, "action_id": "v2_ai_trigger_now", "value": f"{scenario.id}|{int(training_mode)}", "style": "danger"},
+                    {"type": "button", "text": {"type": "plain_text", "text": "Schedule", "emoji": True}, "action_id": "v2_ai_trigger_schedule_open", "value": f"{scenario.id}|{int(training_mode)}"},
+                    {"type": "button", "text": {"type": "plain_text", "text": "Surprise window", "emoji": True}, "action_id": "v2_ai_trigger_surprise", "value": f"{scenario.id}|{int(training_mode)}"},
+                ],
+            },
+        ]
+    }
+
+
+def send_pre_notification(scenario: GeneratedScenario, bot_token: str) -> int:
+    """Training mode = Yes: a real heads-up DM to every real person who
+    holds a role targeted anywhere in this scenario, before anything
+    else fires. Returns how many people were actually reached."""
+    roles = {inj.get("target_role", "") for inj in scenario.injects if inj.get("target_role")}
+    breadcrumb = f"{scenario.threat_label} › {scenario.incident_name} › {scenario.cause_name}"
+    sent_to = set()
+    for role in roles:
+        recipient = _resolve_recipient(scenario.team_id, role)
+        if not recipient or recipient in sent_to:
+            continue
+        try:
+            opened = _call("conversations.open", bot_token, users=recipient)
+            dm_channel_id = opened["channel"]["id"]
+            _call(
+                "chat.postMessage", bot_token, channel=dm_channel_id,
+                text=f":bell: Heads up -- a TestMyPlan drill ({breadcrumb}) involving your role ({role}) will run soon.",
+            )
+            sent_to.add(recipient)
+        except SlackApiError:
+            logger.exception("AI scenario %s: failed to send pre-notification to %s", scenario.id, recipient)
+    return len(sent_to)
 
 
 def build_run_status_card(run: AIExerciseRun, scenario: GeneratedScenario) -> dict:
@@ -68,12 +115,16 @@ def build_run_status_card(run: AIExerciseRun, scenario: GeneratedScenario) -> di
     }
 
 
-def start_run(scenario: GeneratedScenario, trigger_type: str, started_by: str, bot_token: str, scheduled_at=None, origin_channel_id: str = "") -> AIExerciseRun:
+def start_run(
+    scenario: GeneratedScenario, trigger_type: str, started_by: str, bot_token: str, scheduled_at=None,
+    origin_channel_id: str = "", training_mode: bool = False,
+) -> AIExerciseRun:
     import datetime
 
     run = AIExerciseRun(
         team_id=scenario.team_id, scenario=scenario, trigger_type=trigger_type,
         started_by_slack_user_id=started_by, origin_channel_id=origin_channel_id,
+        training_mode=training_mode,
         status=RUN_STATUS_SCHEDULED if scheduled_at else RUN_STATUS_RUNNING,
         scheduled_at=scheduled_at,
         started_at=None if scheduled_at else datetime.datetime.utcnow(),

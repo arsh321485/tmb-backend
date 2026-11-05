@@ -169,12 +169,11 @@ def fire_exercise(exercise: Exercise, bot_token: str) -> None:
             blocks=alarm_blocks,
         )
 
-    if bot_token:
-        from cards.slack_members_v2 import get_workspace_people
-
-        people = get_workspace_people(bot_token)
-        by_code = {p["i"]: p for p in people}
-        send_drill_tasks(exercise, bot_token, by_code)
+    # Generic "Click Done" readiness task DMs removed here (sir's call)
+    # -- only the real decision cards below should go out once a drill
+    # starts, not a separate readiness-check card per person first.
+    # send_drill_tasks/_send_task_dm are left in place, just unused from
+    # here, in case sir wants them back for a plan with no real injects.
 
     # Real injects + scored decisions (sir's TMP_Ransomware_Injects.xlsx)
     # -- only for a drill reached through the real-plan path, where
