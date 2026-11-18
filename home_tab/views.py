@@ -7,9 +7,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from accounts.models import User
 from cards.intro_card_v2 import send_intro_dm
-from cards.loader import load_card
 from cards.slack_client import SlackApiError, publish_home_card
 from commands.slack_signature import SlackSignatureError, verify_slack_signature
 from plans.intake import handle_dm_message_event
@@ -39,7 +37,8 @@ def _handle_dm_message_then_refresh_wizard(event: dict, team_id: str, bot_token:
         location = load_bia_upload_card_location(team_id)
         channel_id, message_ts = location.get("channel_id", ""), location.get("message_ts", "")
         if channel_id and message_ts:
-            card = with_nav_bar_v2(build_bia_upload_card(team_id), "bia_upload")
+            dm_user_id = event.get("user", "")
+            card = with_nav_bar_v2(build_bia_upload_card(team_id, dm_user_id, bot_token), "bia_upload")
             _call("chat.update", bot_token, channel=channel_id, ts=message_ts, **card)
     except SlackApiError:
         logger.exception("Couldn't refresh Upload & Analysis card after a DM upload for team %s", team_id)
@@ -151,13 +150,30 @@ def _handle_team_join(event, team_id, bot_token):
 
 
 def _handle_app_home_opened(event, team_id, bot_token):
+    """
+    Was "25-app-home.json" -- a fixed mockup (31 plans, 74/100
+    preparedness, Alex Morgan, etc.) with no real numbers behind any of
+    it. Then briefly the real Welcome card. Both removed (sir's call) --
+    every real screen (Welcome, Admins, Threat Profile, ...) is reached
+    through the wizard's own message in its channel, not the Home tab.
+    One line left here pointing to where a BIA/BCP upload actually goes
+    (the DM to this app, under Messages), since that's the one thing
+    someone opening this tab might genuinely be looking for.
+    """
     slack_user_id = event.get("user", "")
-    user = User.objects(slack_account__slack_user_id=slack_user_id).first()
-    workspace = Workspace.objects(team_id=team_id).first()
-
-    org_name = workspace.team_name if workspace else ""
-    person_name = user.name if user else ""
-    card = load_card("25-app-home.json", org_name=org_name, person_name=person_name)
+    card = {
+        "type": "home",
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": "Welcome to TestMyPlan 👋", "emoji": True}},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "📎  To upload your BIA/BCP, open *Messages* (the next tab) and send the file there — I'll read it automatically.\n\n🧭  Admins, Threat Profile, Teams and Trigger are all waiting for you in that same conversation.",
+                },
+            },
+        ],
+    }
 
     try:
         publish_home_card(slack_user_id, card, bot_token)

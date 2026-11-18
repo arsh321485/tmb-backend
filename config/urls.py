@@ -18,10 +18,16 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from cards.views import serve_static_asset
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/", include("accounts.urls")),
     path("api/commands/", include("commands.urls")),
     path("api/events/", include("home_tab.urls")),
     path("api/interactivity/", include("cards.urls")),
+    # Real public URLs for images referenced from Slack cards (e.g. the
+    # Welcome banner) -- Slack fetches these itself, so they need to be
+    # reachable over plain HTTPS, not a local file path.
+    path("assets/<str:filename>", serve_static_asset, name="static_asset"),
 ]

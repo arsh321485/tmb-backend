@@ -92,6 +92,8 @@ class OrgProfile(me.Document):
 
     org_name = me.StringField(required=False)
     industry = me.StringField(required=False)
+    sub_industry = me.StringField(required=False)
+    company_size = me.StringField(required=False)
     website_url = me.StringField(required=False)
     regions = me.ListField(me.StringField(), default=list)
     regulations = me.ListField(me.StringField(), default=list)
@@ -115,6 +117,8 @@ class PendingOrgProfile(me.Document):
 
     org_name = me.StringField(required=False)
     industry = me.StringField(required=False)
+    sub_industry = me.StringField(required=False)
+    company_size = me.StringField(required=False)
     website_url = me.StringField(required=False)
     regions = me.ListField(me.StringField(), default=list)
     regulations = me.ListField(me.StringField(), default=list)
@@ -122,6 +126,35 @@ class PendingOrgProfile(me.Document):
     created_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
     meta = {"collection": "pending_org_profiles", "strict": False}
+
+
+class OrgThreatProfile(me.Document):
+    """
+    Agent 1's output for one workspace -- the org-specific threat list
+    generated from OrgProfile (industry/sub-industry/size/countries/
+    regulations), reviewed and approved (or edited) by the admin before
+    it's used anywhere else. Separate from threats_v2_data.py's fixed
+    THREATS list, which is the old one-size-fits-all taxonomy every
+    workspace used to get.
+
+    threats: [{"key", "module", "icon", "label", "incidents", "why",
+    "default_crit", "source": "ai"|"custom"}] -- same shape as the old
+    fixed THREATS entries, so this can swap in for that list without
+    the review screen needing a different shape.
+
+    status "draft" = generated (or edited), not yet approved by the
+    admin; "approved" = admin clicked Approve, this is now the org's
+    real threat profile.
+    """
+
+    team_id = me.StringField(required=True, unique=True)
+    threats = me.ListField(me.DictField(), default=list)
+    status = me.StringField(choices=("draft", "approved"), default="draft")
+
+    generated_at = me.DateTimeField(default=datetime.datetime.utcnow)
+    approved_at = me.DateTimeField(required=False)
+
+    meta = {"collection": "org_threat_profiles", "strict": False}
 
 
 class DraftBiaRequest(me.Document):
@@ -231,34 +264,6 @@ class TeamMember(me.Document):
     meta = {"collection": "team_members", "strict": False}
 
 
-class ScenarioSelection(me.Document):
-    """Which threat -> incident -> cause -> scenario was picked, per module, per workspace."""
-
-    team_id = me.StringField(required=True)
-    module = me.StringField(required=True)
-
-    threat_id = me.StringField(required=False)
-    incident_id = me.StringField(required=False)
-    cause_id = me.StringField(required=False)
-    scenario_id = me.StringField(required=False)
-    phase = me.StringField(required=False)  # which Phase tab was active on Threat Profile when armed
-
-    # Step 6 "Arm this test" -- the plan's steps are still a fixed
-    # placeholder (real per-scenario content is pending sir's sign-off),
-    # but whether it's armed and ready for Step 7 to trigger is real,
-    # saved state regardless of that content decision.
-    armed = me.BooleanField(default=False)
-    armed_at = me.DateTimeField(required=False)
-
-    updated_at = me.DateTimeField(default=datetime.datetime.utcnow)
-
-    meta = {
-        "collection": "scenario_selections",
-        "indexes": [{"fields": ["team_id", "module"], "unique": True}],
-        "strict": False,
-    }
-
-
 STATUS_PROPOSED = "proposed"
 STATUS_APPROVED = "approved"
 
@@ -337,6 +342,14 @@ class AIExerciseRun(me.Document):
     # can be posted back there automatically once the run completes,
     # instead of just sitting in the database with nowhere shown for it.
     origin_channel_id = me.StringField(required=False)
+    # The exact Live-card message (channel + ts) this run is shown on --
+    # confirmed live: completion used to always chat.postMessage a brand
+    # new "Drill report" message into origin_channel_id, even though the
+    # admin was sitting right there looking at the Live card already.
+    # When both of these are set, completion updates that same message
+    # in place instead of posting a second one.
+    live_channel_id = me.StringField(required=False)
+    live_message_ts = me.StringField(required=False)
     started_at = me.DateTimeField(required=False)
     ended_at = me.DateTimeField(required=False)
 
@@ -366,5 +379,9 @@ class AIDecisionResponse(me.Document):
 
     sent_at = me.DateTimeField(default=datetime.datetime.utcnow)
     responded_at = me.DateTimeField(required=False)
+    due_at = me.DateTimeField(required=False)
+    escalated = me.BooleanField(default=False)
+    is_backup = me.BooleanField(default=False)
+    timed_out = me.BooleanField(default=False)
 
     meta = {"collection": "ai_decision_responses", "ordering": ["sent_at"], "strict": False}

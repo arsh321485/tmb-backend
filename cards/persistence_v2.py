@@ -6,7 +6,7 @@ step is (re)opened (nav jump, first visit), it loads the real saved
 state instead of starting blank.
 """
 
-from .models_v2 import AdminSetup, ScenarioSelection, Team, TeamMember
+from .models_v2 import AdminSetup, Team, TeamMember
 
 
 def _get_or_create(team_id: str) -> AdminSetup:
@@ -93,30 +93,6 @@ def get_module_owner(team_id: str, module_id: str) -> str:
     # "invited:Name|email" means someone was invited by email but isn't
     # a real Slack member yet -- not a usable Slack user id.
     return "" if owner.startswith("invited:") else owner
-
-
-def load_scenario_selection(team_id: str, module: str) -> dict:
-    sel = ScenarioSelection.objects(team_id=team_id, module=module).first()
-    if sel is None:
-        return {"threat_id": "", "incident_id": "", "cause_id": "", "scenario_id": "", "phase": "", "armed": False, "armed_at": None}
-    return {
-        "threat_id": sel.threat_id or "",
-        "incident_id": sel.incident_id or "",
-        "cause_id": sel.cause_id or "",
-        "scenario_id": sel.scenario_id or "",
-        "phase": getattr(sel, "phase", "") or "",
-        "armed": sel.armed,
-        "armed_at": sel.armed_at,
-    }
-
-
-def save_scenario_selection(team_id: str, module: str, **fields) -> None:
-    sel = ScenarioSelection.objects(team_id=team_id, module=module).first()
-    if sel is None:
-        sel = ScenarioSelection(team_id=team_id, module=module)
-    for key, value in fields.items():
-        setattr(sel, key, value)
-    sel.save()
 
 
 def _team_module_and_name(team_key: str) -> tuple:

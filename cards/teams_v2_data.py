@@ -657,9 +657,22 @@ def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list
         responsibility = activities[0].get("responsibility", "")
         if responsibility:
             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Responsibility*\n{responsibility}"}})
-        lines = [f"• *{a['activity']}* — {a['phase']}" for a in activities]
-        for chunk_start in range(0, len(lines), 8):
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines[chunk_start:chunk_start + 8])}})
+        # Slack Block Kit has no real table block -- a `fields` section
+        # is the closest real equivalent. A real bug (confirmed live):
+        # one block per activity row blew this card past Slack's real
+        # hard 50-block-per-message cap once more than one role's
+        # activities were on screen -- Slack silently rejects the whole
+        # update when that happens, which made every button on the
+        # card look dead (the redraw never actually went through). A
+        # `fields` block holds up to 10 fields (5 two-column rows), so
+        # packing 5 rows per block instead of 1 keeps the same aligned
+        # Activity/Phase table look at a fraction of the block cost.
+        table_fields = [{"type": "mrkdwn", "text": "*Activity*"}, {"type": "mrkdwn", "text": "*Phase*"}]
+        for a in activities:
+            table_fields.append({"type": "mrkdwn", "text": a["activity"]})
+            table_fields.append({"type": "mrkdwn", "text": a["phase"]})
+        for i in range(0, len(table_fields), 10):
+            blocks.append({"type": "section", "fields": table_fields[i : i + 10]})
     else:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "_No catalog activities on file for this role._"}})
 
@@ -834,9 +847,10 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
     total_mapped = sum(len(r) for r in resp.values())
     ready = staffed == total
 
+    status_dot = ":large_green_circle:" if ready else ":large_orange_circle:"
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":shield: Step 2 · Response teams", "emoji": True}},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": f":large_green_circle: *{staffed} / {total} mandatory staffed*"}]},
+        {"type": "header", "text": {"type": "plain_text", "text": ":busts_in_silhouette: Step 2 · Response teams", "emoji": True}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"{status_dot} *{staffed} / {total} mandatory staffed*  ·  :handshake: {total_members} member(s) added"}]},
         {
             "type": "section",
             "text": {

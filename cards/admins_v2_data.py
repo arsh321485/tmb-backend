@@ -175,30 +175,58 @@ def _admin_row(mod: dict, assigned_code: str | None, expanded: str | None, peopl
     return blocks
 
 
+_MODULE_ICON = {"cyber": ":shield:", "privacy": ":lock:"}
+_MODULE_BLURB = {
+    "cyber": "Threat drills, containment scoring, incident response",
+    "privacy": "72-hour regulator clock, breach evidence, data rights",
+}
+
+
 def build_admins_card(state: dict, people: list, current_user_id: str) -> dict:
     selected_modules = state.get("selected_modules") or ["cyber", "privacy"]
+    toggleable = [mod for mod in MODULE_ADMINS if mod["id"] in TOGGLEABLE_MODULES]
+    picked_count = sum(1 for mod in toggleable if mod["id"] in selected_modules)
 
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":gear: Step 1 · Select modules", "emoji": True}},
+        {"type": "header", "text": {"type": "plain_text", "text": ":sparkles: Step 1 · Select your modules", "emoji": True}},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Choose which IR domains apply to your org. Nothing here is permanent — you can turn any of these on or off again later.",
+            },
+        },
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f":large_blue_circle: *{picked_count}/{len(toggleable)}* selected"}],
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"{_MODULE_ICON.get(mod['id'], ':gear:')} *{mod['m']}*\n{_MODULE_BLURB.get(mod['id'], mod['note'])}"}
+                for mod in toggleable
+            ],
+        },
         {
             "type": "section",
             "block_id": "admin_module_toggle",
-            "text": {"type": "mrkdwn", "text": "*Which modules does your org need?* Turn off anything that doesn't apply — you can change this later."},
+            "text": {"type": "mrkdwn", "text": "*Turn modules on/off:*"},
             "accessory": {
                 "type": "checkboxes",
                 "action_id": "v2_admin_toggle_modules",
                 "options": [
-                    {"text": {"type": "plain_text", "text": mod["m"]}, "value": mod["id"]}
-                    for mod in MODULE_ADMINS if mod["id"] in TOGGLEABLE_MODULES
+                    {"text": {"type": "plain_text", "text": f"{_MODULE_ICON.get(mod['id'], '')} {mod['m']}", "emoji": True}, "value": mod["id"]}
+                    for mod in toggleable
                 ],
                 **(
                     {
                         "initial_options": [
-                            {"text": {"type": "plain_text", "text": mod["m"]}, "value": mod["id"]}
-                            for mod in MODULE_ADMINS if mod["id"] in TOGGLEABLE_MODULES and mod["id"] in selected_modules
+                            {"text": {"type": "plain_text", "text": f"{_MODULE_ICON.get(mod['id'], '')} {mod['m']}", "emoji": True}, "value": mod["id"]}
+                            for mod in toggleable if mod["id"] in selected_modules
                         ]
                     }
-                    if any(mod["id"] in selected_modules for mod in MODULE_ADMINS if mod["id"] in TOGGLEABLE_MODULES)
+                    if picked_count
                     else {}
                 ),
             },
@@ -209,12 +237,16 @@ def build_admins_card(state: dict, people: list, current_user_id: str) -> dict:
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "→ Continue", "emoji": True},
+                    "text": {"type": "plain_text", "text": ":rocket: Continue", "emoji": True},
                     "action_id": "v2_admins_done",
                     "value": "next",
                     "style": "primary",
                 }
             ],
+        },
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": ":bulb: Every module can be revisited later from the nav bar above."}],
         },
     ]
 

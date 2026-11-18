@@ -36,20 +36,23 @@ def build_welcome_card(recipient_name: str, catalog_team_id: str, team_name: str
             {"type": "context", "elements": [{"type": "mrkdwn", "text": f"{badge}  ·  {team_name}"}]},
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "This DM is where your drill runs — every step arrives as one card at a time, nothing to install."},
+                "text": {"type": "mrkdwn", "text": ":speech_balloon: This DM is where your drill runs — every step arrives as one card at a time, nothing to install."},
             },
-            {"type": "section", "text": {"type": "mrkdwn", "text": "*How it works*"}},
+            {"type": "divider"},
+            {"type": "section", "text": {"type": "mrkdwn", "text": ":sparkles: *HOW IT WORKS*"}},
             {
                 "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": (
-                        ":one: *Review* your assigned role and responsibilities\n"
-                        ":two: *Read* each task card as it arrives\n"
-                        ":three: *Respond* directly in the card — your answer is logged and timed\n"
-                        ":four: *Complete* all tasks before the exercise ends"
-                    ),
-                },
+                "fields": [
+                    {"type": "mrkdwn", "text": ":one: *Review*\nYour assigned role and responsibilities"},
+                    {"type": "mrkdwn", "text": ":two: *Read*\nEach task card as it arrives"},
+                ],
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": ":three: *Respond*\nDirectly in the card — logged and timed"},
+                    {"type": "mrkdwn", "text": ":four: *Complete*\nAll tasks before the exercise ends"},
+                ],
             },
             {"type": "divider"},
             {
@@ -57,12 +60,16 @@ def build_welcome_card(recipient_name: str, catalog_team_id: str, team_name: str
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "→ View my role & responsibilities", "emoji": True},
+                        "text": {"type": "plain_text", "text": ":rocket: View my role & responsibilities", "emoji": True},
                         "action_id": "v2_role_view",
                         "value": _value(catalog_team_id, role, is_backup),
                         "style": "primary",
                     }
                 ],
+            },
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": ":bulb: No action needed right now — just review your role, then wait for the first task card."}],
             },
         ]
     }
@@ -70,21 +77,22 @@ def build_welcome_card(recipient_name: str, catalog_team_id: str, team_name: str
 
 def build_role_card(catalog_team_id: str, team_name: str, role: str, primary_name: str, backup_name: str, is_backup: bool, responsibility: dict | None, value: str) -> dict:
     top_fields = [
-        {"type": "mrkdwn", "text": f"*Team:* *{team_name}*"},
-        {"type": "mrkdwn", "text": f"*Role:* *{role}*"},
+        {"type": "mrkdwn", "text": f":busts_in_silhouette: *Team*\n{team_name}"},
+        {"type": "mrkdwn", "text": f":bust_in_silhouette: *Role*\n{role}"},
     ]
     other_fields = [
-        {"type": "mrkdwn", "text": f"*Primary:* {primary_name or '—'}" if is_backup else f"*Backup:* {backup_name or '—'}"},
+        {"type": "mrkdwn", "text": f":large_green_circle: *Primary*\n{primary_name or '—'}" if is_backup else f":large_orange_circle: *Backup*\n{backup_name or '—'}"},
     ]
 
     blocks = [
-        {"type": "section", "text": {"type": "mrkdwn", "text": ":clipboard: *Your role assignment*"}},
+        {"type": "header", "text": {"type": "plain_text", "text": ":clipboard: Your role assignment", "emoji": True}},
         {"type": "section", "fields": top_fields},
         {"type": "section", "fields": other_fields},
+        {"type": "divider"},
     ]
 
     if is_backup:
-        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "If the primary can't respond, these are the activities you'd step in and run:"}]})
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ":large_orange_circle: If the primary can't respond, these are the activities you'd step in and run:"}]})
 
     # Real multi-row activity list for this role (sir's IR Team Catalog
     # spreadsheet, Roles sheet) -- replaces the mockup's example table
@@ -99,38 +107,50 @@ def build_role_card(catalog_team_id: str, team_name: str, role: str, primary_nam
         # shown once here rather than once per activity.
         real_responsibility = activities[0].get("responsibility", "")
         if real_responsibility:
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Responsibility*\n{real_responsibility}"}})
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f":memo: *Responsibility*\n{real_responsibility}"}})
+            blocks.append({"type": "divider"})
 
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Your IR Activities*"}})
-        lines = [f"• *{a['activity']}* — {a['phase']}" for a in activities]
-        for chunk_start in range(0, len(lines), 8):
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines[chunk_start:chunk_start + 8])}})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":clipboard: *Your IR Activities*"}})
+        # Slack Block Kit has no real table block -- a `fields` block
+        # (up to 10 fields = 5 two-column rows) is the closest real
+        # equivalent AND the cheapest on Slack's real hard 50-block-
+        # per-message cap -- one block per row (tried first) blew the
+        # Teams screen's version of this same table past that cap and
+        # silently broke every button on the card (confirmed live).
+        # Packing 5 rows per block avoids that here too.
+        table_fields = [{"type": "mrkdwn", "text": "*Activity*"}, {"type": "mrkdwn", "text": "*Phase*"}]
+        for a in activities:
+            table_fields.append({"type": "mrkdwn", "text": a["activity"]})
+            table_fields.append({"type": "mrkdwn", "text": a["phase"]})
+        for i in range(0, len(table_fields), 10):
+            blocks.append({"type": "section", "fields": table_fields[i : i + 10]})
     elif responsibility:
         blocks.append(
             {
                 "type": "section",
                 "fields": [
-                    {"type": "mrkdwn", "text": f"*Responsibility*\n{responsibility.get('text', '')}"},
-                    {"type": "mrkdwn", "text": f"*Action*\n{responsibility.get('action', '')}: {responsibility.get('detail', '')}"},
-                    {"type": "mrkdwn", "text": f"*Test phase*\n{responsibility.get('phase', '')}"},
+                    {"type": "mrkdwn", "text": f":memo: *Responsibility*\n{responsibility.get('text', '')}"},
+                    {"type": "mrkdwn", "text": f":zap: *Action*\n{responsibility.get('action', '')}: {responsibility.get('detail', '')}"},
+                    {"type": "mrkdwn", "text": f":calendar: *Test phase*\n{responsibility.get('phase', '')}"},
                 ],
             }
         )
 
+    blocks.append({"type": "divider"})
     blocks.append(
         {
             "type": "actions",
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Acknowledge my role", "emoji": True},
+                    "text": {"type": "plain_text", "text": ":white_check_mark: Acknowledge my role", "emoji": True},
                     "action_id": "v2_role_acknowledge",
                     "value": value,
                     "style": "primary",
                 },
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "I can't cover this role", "emoji": True},
+                    "text": {"type": "plain_text", "text": ":no_entry_sign: I can't cover this role", "emoji": True},
                     "action_id": "v2_role_decline",
                     "value": value,
                 },
@@ -143,7 +163,9 @@ def build_role_card(catalog_team_id: str, team_name: str, role: str, primary_nam
 def build_ack_card(recipient_name: str, team_name: str, role: str, value: str) -> dict:
     return {
         "blocks": [
-            {"type": "section", "text": {"type": "mrkdwn", "text": ":white_check_mark: *Confirm your role assignment*"}},
+            {"type": "header", "text": {"type": "plain_text", "text": ":raised_hand: One last step", "emoji": True}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": f":busts_in_silhouette: {team_name}   ·   :bust_in_silhouette: {role}"}]},
+            {"type": "divider"},
             {
                 "type": "section",
                 "text": {
@@ -151,12 +173,13 @@ def build_ack_card(recipient_name: str, team_name: str, role: str, value: str) -
                     "text": f"I, *{recipient_name}*, confirm that I understand my role as *{role}* on *{team_name}*. I've reviewed my responsibilities and I'm ready to respond when a test fires.",
                 },
             },
+            {"type": "divider"},
             {
                 "type": "actions",
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "I acknowledge — I'm ready", "emoji": True},
+                        "text": {"type": "plain_text", "text": ":white_check_mark: I acknowledge — I'm ready", "emoji": True},
                         "action_id": "v2_role_ack_confirm",
                         "value": value,
                         "style": "primary",
@@ -211,11 +234,12 @@ def build_backup_activated_card(recipient_name: str, team_name: str, role: str, 
 def build_ack_done_card(acknowledged_at_text: str) -> dict:
     return {
         "blocks": [
-            {"type": "section", "text": {"type": "mrkdwn", "text": ":white_check_mark: *Acknowledged*"}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": ":white_check_mark: *Acknowledged — you're all set*"}},
+            {"type": "divider"},
             {
                 "type": "context",
                 "elements": [
-                    {"type": "mrkdwn", "text": f"Logged {acknowledged_at_text}. Your first task card will arrive here when the test fires."}
+                    {"type": "mrkdwn", "text": f":clock3: Logged {acknowledged_at_text}. Your first task card will arrive here when the test fires."}
                 ],
             },
         ]

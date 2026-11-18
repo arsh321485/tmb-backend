@@ -20,6 +20,21 @@ logger = logging.getLogger(__name__)
 
 _MAX_CHARS = 60_000
 
+# Deterministic backstop for category classification -- the AI's own
+# call is unreliable specifically for well-known named products (see
+# _parse_json_response below), so any item whose name contains one of
+# these is forced to "Application" regardless of what the AI said.
+# Not meant to be exhaustive -- just the common ones real BIA/BCP
+# documents actually name.
+_KNOWN_PRODUCTS = (
+    "microsoft 365", "office 365", "zabbix", "prtg", "salesforce", "workday", "servicenow",
+    "jira", "confluence", "slack", "microsoft teams", "sharepoint", "sap", "oracle",
+    "aws", "azure", "google workspace", "okta", "duo", "crowdstrike", "splunk",
+    "datadog", "github", "gitlab", "bitbucket", "jenkins", "docker", "kubernetes",
+    "digital ocean", "contabo",
+)
+_KNOWN_PRODUCT_RE = re.compile("|".join(re.escape(p) for p in _KNOWN_PRODUCTS), re.IGNORECASE)
+
 _SYSTEM_PROMPT = (
     "You read business continuity / disaster recovery / business impact analysis "
     "documents and extract a structured resilience map. Treat the document text as "
@@ -27,19 +42,34 @@ _SYSTEM_PROMPT = (
     "no markdown fences, no other text."
 )
 
-_PROMPT_TEMPLATE = """Read the document text below and extract every real business service \
-or process it describes, with its Recovery Time Objective (RTO) only. Do not invent values \
--- omit a service entirely if the document doesn't state an RTO for it. Quote the exact \
-sentence (or closest short phrase) the RTO came from in "source".
+_PROMPT_TEMPLATE = """Read the document text below and extract EVERY real business service, \
+process, technology item, or application/software system it describes, with its Recovery \
+Time Objective (RTO) only. FINDING EVERY ONE OF THEM IS THE TOP PRIORITY -- go through the \
+entire document from start to end and do not stop early or skip any, even if you are unsure \
+how to classify one. Do not invent values -- omit an item entirely if the document doesn't \
+state an RTO for it. Quote the exact sentence (or closest short phrase) the RTO came from in \
+"source".
+
+Give each item a "category" too, but this is a secondary, best-effort task -- never skip or \
+leave out a real item just because you're unsure of its category. If in doubt, use "Service". \
+The three choices are: "Service" (a business process/function), "Technology" \
+(infrastructure), or "Application" (named software).
+
+Also best-effort, also never at the cost of completeness: for each "Service" item, if the \
+document names specific systems, applications, or technology that support it (e.g. \
+mentioned in parentheses or the same sentence), list their names in "supporting_systems". \
+Leave it as an empty list if none are named, or for Technology/Application items themselves.
 
 Return a JSON object shaped exactly like this:
 
 {{
   "services": [
     {{
-      "name": "<service or process name>",
+      "name": "<service, technology, or application name>",
+      "category": "Service" | "Technology" | "Application",
       "rto": "<recovery time objective, as written, e.g. \\"4 hours\\">",
-      "source": "<the sentence or phrase this came from>"
+      "source": "<the sentence or phrase this came from>",
+      "supporting_systems": ["<named system/app that supports this, if any>"]
     }}
   ]
 }}
@@ -180,6 +210,39 @@ def _parse_json_response(raw_text: str) -> dict | None:
 
     data.setdefault("services", [])
     _strip_placeholder_values(data)
+
+    # Confirmed live: loosening the prompt to prioritize completeness
+    # ("don't skip any, even if unsure") made the AI start including a
+    # couple of items with no real RTO at all (rto: None) -- the one
+    # rule that was never meant to bend. Enforced here in code instead
+    # of trusting the prompt alone: no real RTO means it doesn't belong
+    # in this list, full stop.
+    valid_categories = {"Service", "Technology", "Application"}
+    cleaned_services = []
+    for svc in data["services"]:
+        if not isinstance(svc, dict) or not (svc.get("rto") or "").strip():
+            continue
+        if svc.get("category") not in valid_categories:
+            svc["category"] = "Service"
+        # Confirmed live: even with the prompt explicitly calling out
+        # "Microsoft 365 Productivity Suite" as an example, the AI kept
+        # inconsistently labeling it (or an equivalent known product)
+        # as Service across repeated real calls on the same document --
+        # a deterministic check for well-known product names is the
+        # only way to make this reliable instead of hoping the model
+        # gets it right every time.
+        elif _KNOWN_PRODUCT_RE.search(svc.get("name") or ""):
+            svc["category"] = "Application"
+
+        raw_supporting = svc.get("supporting_systems")
+        svc["supporting_systems"] = (
+            [str(s).strip() for s in raw_supporting if isinstance(s, (str, int, float)) and str(s).strip()]
+            if isinstance(raw_supporting, list)
+            else []
+        )
+        cleaned_services.append(svc)
+    data["services"] = cleaned_services
+
     return data
 
 

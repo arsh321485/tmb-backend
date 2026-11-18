@@ -20,17 +20,34 @@ INDUSTRY_OPTIONS = [
     "Healthcare", "Financial Services", "Retail", "Manufacturing", "Technology",
     "Legal", "Education", "Government", "Energy", "Other",
 ]
-REGION_OPTIONS = ["North America", "UK", "EU", "APAC", "Middle East", "Other"]
+REGION_OPTIONS = [
+    "United States", "Canada", "United Kingdom", "Ireland", "Germany", "France", "Netherlands",
+    "Spain", "Italy", "Switzerland", "Sweden", "Norway", "Denmark", "Finland", "Poland",
+    "Belgium", "Austria", "Portugal", "Greece", "Czech Republic", "Romania",
+    "Saudi Arabia", "United Arab Emirates", "Qatar", "Kuwait", "Bahrain", "Oman", "Egypt",
+    "Jordan", "Israel", "Turkey", "South Africa", "Nigeria", "Kenya",
+    "India", "Pakistan", "Bangladesh", "Sri Lanka", "China", "Japan", "South Korea",
+    "Singapore", "Malaysia", "Indonesia", "Philippines", "Vietnam", "Thailand",
+    "Australia", "New Zealand", "Hong Kong", "Taiwan",
+    "Brazil", "Mexico", "Argentina", "Chile", "Colombia", "Peru",
+    "Other",
+]
 REGULATION_OPTIONS = ["GDPR", "HIPAA", "NIS2", "DSPT", "SOC 2", "PCI DSS", "Not sure yet"]
+COMPANY_SIZE_OPTIONS = ["1-50", "51-200", "201-1000", "1000+"]
 
 
 def load_profile(team_id: str) -> dict:
     profile = OrgProfile.objects(team_id=team_id).first()
     if profile is None:
-        return {"org_name": "", "industry": "", "website_url": "", "regions": [], "regulations": []}
+        return {
+            "org_name": "", "industry": "", "sub_industry": "", "company_size": "",
+            "website_url": "", "regions": [], "regulations": [],
+        }
     return {
         "org_name": profile.org_name or "",
         "industry": profile.industry or "",
+        "sub_industry": profile.sub_industry or "",
+        "company_size": profile.company_size or "",
         "website_url": profile.website_url or "",
         "regions": list(profile.regions),
         "regulations": list(profile.regulations),
@@ -81,7 +98,9 @@ def build_setup_card(profile: dict) -> dict:
                     f"*Organization name*\n{profile['org_name'] or '_Not set_'}\n\n"
                     f"*Website URL*\n{profile['website_url'] or '_Not set_'}\n\n"
                     f"*Industry*\n{profile['industry'] or '_Not set_'}\n\n"
-                    f"*Where you operate*\n{', '.join(profile['regions']) or '_Not set_'}\n\n"
+                    f"*Sub-industry*\n{profile['sub_industry'] or '_Not set_'}\n\n"
+                    f"*Company size*\n{profile['company_size'] or '_Not set_'}\n\n"
+                    f"*Countries you operate in*\n{', '.join(profile['regions']) or '_Not set_'}\n\n"
                     f"*Regulations*\n{', '.join(profile['regulations']) or '_Not set_'}"
                 ),
             },
@@ -125,6 +144,17 @@ def build_modal_view(profile: dict, channel_id: str, message_ts: str) -> dict:
     else:
         industry_element["placeholder"] = {"type": "plain_text", "text": "Select…"}
 
+    company_size = profile.get("company_size", "")
+    company_size_element = {
+        "type": "static_select",
+        "action_id": "value",
+        "options": [_select_option(o) for o in COMPANY_SIZE_OPTIONS],
+    }
+    if company_size and company_size in COMPANY_SIZE_OPTIONS:
+        company_size_element["initial_option"] = _select_option(company_size)
+    else:
+        company_size_element["placeholder"] = {"type": "plain_text", "text": "Select…"}
+
     return {
         "type": "modal",
         "callback_id": CALLBACK_ID,
@@ -152,6 +182,25 @@ def build_modal_view(profile: dict, channel_id: str, message_ts: str) -> dict:
             },
             {
                 "type": "input",
+                "block_id": "sub_industry",
+                "label": {"type": "plain_text", "text": "Sub-industry"},
+                "optional": True,
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "value",
+                    "initial_value": profile.get("sub_industry", ""),
+                    "placeholder": {"type": "plain_text", "text": "e.g. Capital Markets, Retail Banking"},
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "company_size",
+                "label": {"type": "plain_text", "text": "Company size"},
+                "optional": True,
+                "element": company_size_element,
+            },
+            {
+                "type": "input",
                 "block_id": "website_url",
                 "label": {"type": "plain_text", "text": "Website URL"},
                 "element": {
@@ -164,12 +213,12 @@ def build_modal_view(profile: dict, channel_id: str, message_ts: str) -> dict:
             {
                 "type": "input",
                 "block_id": "regions",
-                "label": {"type": "plain_text", "text": "Where do you operate?"},
+                "label": {"type": "plain_text", "text": "Which countries do you operate in?"},
                 "optional": True,
                 "element": {
                     "type": "multi_static_select",
                     "action_id": "value",
-                    "placeholder": {"type": "plain_text", "text": "Select regions…"},
+                    "placeholder": {"type": "plain_text", "text": "Select countries…"},
                     "options": [_select_option(r) for r in REGION_OPTIONS],
                     **(
                         {"initial_options": [_select_option(r) for r in profile.get("regions", []) if r in REGION_OPTIONS]}
@@ -224,6 +273,9 @@ def handle_submission(payload: dict, bot_token: str) -> None:
     website_url = (values.get("website_url", {}).get("value", {}).get("value") or "").strip()
     industry = values.get("industry", {}).get("value", {}).get("selected_option") or {}
     industry_value = industry.get("value", "")
+    sub_industry = (values.get("sub_industry", {}).get("value", {}).get("value") or "").strip()
+    company_size = values.get("company_size", {}).get("value", {}).get("selected_option") or {}
+    company_size_value = company_size.get("value", "")
     regions = [o["value"] for o in (values.get("regions", {}).get("value", {}).get("selected_options") or [])]
     regulations = [o["value"] for o in (values.get("regulations", {}).get("value", {}).get("selected_options") or [])]
 
@@ -239,6 +291,7 @@ def handle_submission(payload: dict, bot_token: str) -> None:
 
     save_profile(
         team_id, org_name=org_name, website_url=website_url, industry=industry_value,
+        sub_industry=sub_industry, company_size=company_size_value,
         regions=regions, regulations=regulations,
     )
 

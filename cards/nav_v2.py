@@ -9,11 +9,10 @@ ever affect the real, live command-center cards.
 NAV_STEPS_V2 = [
     ("Welcome", "welcome"),
     ("Admins", "admins"),
+    ("Threat Profile", "threat_review"),
     ("Upload & Analysis", "bia_upload"),
     ("Teams", "teams"),
-    ("Threat Profile", "org_threats"),
-    ("TestMyPlan", "test_plan"),
-    ("Trigger", "trigger"),
+    ("Threat Mapping", "org_threats"),
 ]
 
 

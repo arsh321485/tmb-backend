@@ -3,20 +3,24 @@ A23/A24 -- runs an APPROVED GeneratedScenario (plans/scenario_generator.py)
 as a real live drill: sends real DMs to real people, real decision
 buttons, real scored answers, real consequence chaining.
 
-Deliberately its own file, touching nothing in cards/inject_catalog_v2.py,
-cards/plan_catalog_v2.py or exercises/drill.py -- those run the 3
-pre-built drills (RW-01/02/03) and are left exactly as they are. This
-file only reuses stable, generic building blocks (the Slack API client,
-and reading -- never writing -- Team/TeamMember) to avoid any risk of
-breaking what already works.
+The old hand-written plan drill (RW-01/02/03) is removed entirely --
+this is now the only drill engine. This file reuses stable, generic
+building blocks (the Slack API client, and reading -- never writing --
+Team/TeamMember) to avoid any risk of breaking what already works.
 """
 
+import datetime
 import logging
 
 from .models_v2 import AIDecisionResponse, AIExerciseRun, GeneratedScenario, RUN_STATUS_COMPLETED, RUN_STATUS_RUNNING, RUN_STATUS_SCHEDULED
 from .slack_client import SlackApiError, _call
 
 logger = logging.getLogger(__name__)
+
+# Same real deadline/escalation behaviour the old fixed-plan drill had --
+# an AI-generated decision with no real SLA set still needs a real
+# deadline to escalate against.
+DEFAULT_RESPONSE_TIMER_MIN = 10
 
 
 def _resolve_recipient(team_id: str, role: str) -> str | None:
@@ -32,46 +36,92 @@ def _resolve_recipient(team_id: str, role: str) -> str | None:
     return None
 
 
+def _resolve_backup(team_id: str, role: str, primary_id: str) -> str | None:
+    """Same lookup as _resolve_recipient, but the backup Slack user id for
+    this role -- used only when the primary misses the real deadline."""
+    from .models_v2 import Team, TeamMember
+
+    for team_doc in Team.objects(team_id=team_id):
+        tm = TeamMember.objects(team=team_doc, role=role).first()
+        if tm and tm.backup_slack_user_ids:
+            backup_id = tm.backup_slack_user_ids[0]
+            if backup_id and backup_id != primary_id:
+                return backup_id
+    return None
+
+
 def build_trigger_picker_card(scenario: GeneratedScenario) -> dict:
-    """First real step after Approve (flowchart's "Training mode?" box):
-    Yes sends everyone a real pre-notification DM before anything else
-    happens; No skips straight to the Trigger/Schedule/Surprise picker,
-    same as the drill always worked before this existed."""
+    """First real step after Approve (flowchart's "Training mode?" box).
+    Same exact layout as the fixed-plan path's own Trigger screen
+    (trigger_v2_data.build_training_mode_card) -- sir's call: one
+    Trigger screen design, not a second plainer one just because this
+    scenario came from the AI instead of the hand-built catalog. Yes
+    sends everyone a real pre-notification DM before anything else
+    happens; No skips straight to the Trigger/Schedule/Surprise picker."""
     breadcrumb = f"{scenario.threat_label}  ›  {scenario.incident_name}  ›  {scenario.cause_name}"
     return {
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": ":white_check_mark: Approved -- ready to run", "emoji": True}},
+            {"type": "header", "text": {"type": "plain_text", "text": ":zap: Step 7 · Trigger", "emoji": True}},
             {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_"}]},
-            {"type": "section", "text": {"type": "mrkdwn", "text": "Training mode? (sends a heads-up DM to everyone involved before the test starts)"}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": ":bell: *Training mode?*\nChoose how the team finds out this is starting."}},
+            {"type": "divider"},
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": ":mega: *Yes · Pre-notify*\n_Heads-up DM sent first_"},
+                    {"type": "mrkdwn", "text": ":dash: *No · Go live*\n_No warning, starts immediately_"},
+                ],
+            },
+            {"type": "divider"},
             {
                 "type": "actions",
                 "elements": [
-                    {"type": "button", "text": {"type": "plain_text", "text": "Yes -- send pre-notification", "emoji": True}, "action_id": "v2_ai_training_yes", "value": str(scenario.id), "style": "primary"},
-                    {"type": "button", "text": {"type": "plain_text", "text": "No -- send test directly", "emoji": True}, "action_id": "v2_ai_training_no", "value": str(scenario.id)},
+                    {"type": "button", "text": {"type": "plain_text", "text": ":mega: Yes -- send pre-notification", "emoji": True}, "action_id": "v2_ai_training_yes", "value": str(scenario.id), "style": "primary"},
+                    {"type": "button", "text": {"type": "plain_text", "text": ":dash: No -- send test directly", "emoji": True}, "action_id": "v2_ai_training_no", "value": str(scenario.id)},
                 ],
+            },
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": ":bulb: Training mode is the safer default for a first-time or new-team drill."}],
             },
         ]
     }
 
 
-def build_timing_picker_card(scenario: GeneratedScenario, training_mode: bool) -> dict:
+def build_timing_picker_card(scenario: GeneratedScenario, training_mode: bool, picked: str = "") -> dict:
+    """Same exact layout as the fixed-plan path's own Trigger/when-to-run
+    screen (trigger_v2_data.build_trigger_card, same TRIGGERS list) --
+    sir's call, same as build_trigger_picker_card above: one screen
+    design for this, not a second one just for AI scenarios."""
+    from .trigger_v2_data import TRIGGERS
+
     breadcrumb = f"{scenario.threat_label}  ›  {scenario.incident_name}  ›  {scenario.cause_name}"
     mode_note = ":white_check_mark: Pre-notification sent." if training_mode else "Sending directly -- no advance warning."
-    return {
-        "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": ":dart: Choose when to run", "emoji": True}},
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_  ·  {mode_note}"}]},
-            {"type": "section", "text": {"type": "mrkdwn", "text": "Choose when to run this scenario for real."}},
+    value_suffix = f"{scenario.id}|{int(training_mode)}"
+    action_for_key = {"now": "v2_ai_trigger_now", "sched": "v2_ai_trigger_schedule_open", "surprise": "v2_ai_trigger_surprise"}
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": ":zap: Step 7 · Trigger", "emoji": True}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_  ·  {mode_note}"}]},
+        {"type": "divider"},
+    ]
+    for key, icon, label, desc in TRIGGERS:
+        is_picked = key == picked
+        blocks.append(
             {
-                "type": "actions",
-                "elements": [
-                    {"type": "button", "text": {"type": "plain_text", "text": "Trigger now", "emoji": True}, "action_id": "v2_ai_trigger_now", "value": f"{scenario.id}|{int(training_mode)}", "style": "danger"},
-                    {"type": "button", "text": {"type": "plain_text", "text": "Schedule", "emoji": True}, "action_id": "v2_ai_trigger_schedule_open", "value": f"{scenario.id}|{int(training_mode)}"},
-                    {"type": "button", "text": {"type": "plain_text", "text": "Surprise window", "emoji": True}, "action_id": "v2_ai_trigger_surprise", "value": f"{scenario.id}|{int(training_mode)}"},
-                ],
-            },
-        ]
-    }
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": (":white_check_mark: " if is_picked else f"{icon} ") + f"*{label}*\n{desc}"},
+                "accessory": {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Picked" if is_picked else "Choose", "emoji": True},
+                    "action_id": action_for_key[key],
+                    "value": value_suffix,
+                    **({"style": "danger"} if key == "now" and not picked else {}),
+                },
+            }
+        )
+        blocks.append({"type": "divider"})
+    return {"blocks": blocks}
 
 
 def send_pre_notification(scenario: GeneratedScenario, bot_token: str) -> int:
@@ -99,18 +149,76 @@ def send_pre_notification(scenario: GeneratedScenario, bot_token: str) -> int:
 
 
 def build_run_status_card(run: AIExerciseRun, scenario: GeneratedScenario) -> dict:
+    """Same exact "Live" screen layout as the fixed-plan path
+    (trigger_v2_data.build_live_card) -- sir's call, same reasoning as
+    the Trigger screens above: an AI scenario is a normal part of this
+    app now, not a separate feature with its own look. Unlike that
+    screen's placeholder fields ("not built yet"), these are real
+    counts from this run's actual AIDecisionResponse rows."""
     breadcrumb = f"{scenario.threat_label}  ›  {scenario.incident_name}  ›  {scenario.cause_name}"
+
     if run.status == RUN_STATUS_SCHEDULED:
-        text = f":alarm_clock: Scheduled for {run.scheduled_at.strftime('%d %b %Y, %H:%M UTC')}."
+        status_text = f":alarm_clock: *Scheduled*  ·  {run.scheduled_at.strftime('%d %b %Y, %H:%M UTC')}"
     elif run.status == RUN_STATUS_RUNNING:
-        text = ":rotating_light: Live -- injects are going out to real people now."
+        status_text = ":fire: *Live now*  ·  injects are going out to real people"
     else:
-        text = ":checkered_flag: Completed."
+        status_text = ":checkered_flag: *Completed*"
+
+    responses = AIDecisionResponse.objects(run=run)
+    notified_count = len(responses.distinct("assigned_slack_user_id"))
+    total_injects = len(scenario.injects)
+    answered_count = responses.filter(responded_at__ne=None).count()
+    scored = [r for r in responses if r.score is not None]
+    total_score = sum(r.score for r in scored)
+    max_possible = sum(10 for _ in scored)
+
+    participants_text = f"{notified_count} real {'person' if notified_count == 1 else 'people'} DM'd so far" if notified_count else "Nobody reached yet"
+    injects_text = f"{total_injects - answered_count} / {total_injects} remaining" if total_injects else "0"
+    scoring_text = f"{total_score} / {max_possible}" if scored else "No decisions answered yet"
+
     return {
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": ":dart: AI scenario run", "emoji": True}},
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_"}]},
-            {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+            {"type": "header", "text": {"type": "plain_text", "text": breadcrumb, "emoji": True}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": status_text}]},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "The test is running. You can watch, inject complications, or pull the report at any time.",
+                },
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Participants notified*\n{participants_text}"},
+                    {"type": "mrkdwn", "text": f"*Injects remaining*\n{injects_text}"},
+                    {"type": "mrkdwn", "text": f"*Scoring*\n{scoring_text}"},
+                ],
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Preparedness report", "emoji": True},
+                        "action_id": "v2_ai_live_report",
+                        "value": str(run.id),
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Inject a scenario", "emoji": True},
+                        "action_id": "v2_live_inject",
+                        "value": "inject",
+                        "style": "danger",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Run another test", "emoji": True},
+                        "action_id": "v2_nav_jump__welcome",
+                        "value": "new",
+                    },
+                ],
+            },
         ]
     }
 
@@ -185,7 +293,12 @@ def _fire_next_inject(run: AIExerciseRun, bot_token: str) -> None:
 
         run.ended_at = datetime.datetime.utcnow()
         run.save()
-        _post_report(run, bot_token)
+        # Sir's call: finishing the last question never posts or updates
+        # anything on its own -- the report only ever shows up when the
+        # admin actually clicks "Preparedness report" (still sitting
+        # right there on the Live card they already have open), which
+        # opens it as the real popup every time, same as a manual click
+        # mid-drill already does.
         return
 
     run.current_seq = next_inject.get("seq")
@@ -227,18 +340,26 @@ def build_report_card(run: AIExerciseRun) -> dict:
     return {"blocks": blocks}
 
 
-def _post_report(run: AIExerciseRun, bot_token: str) -> None:
-    if not (run.origin_channel_id and bot_token):
-        return
-    try:
-        _call("chat.postMessage", bot_token, channel=run.origin_channel_id, text="Drill report ready", **build_report_card(run))
-    except SlackApiError:
-        logger.exception("AI run %s: failed to post report to %s", run.id, run.origin_channel_id)
+def build_report_modal_view(run: AIExerciseRun) -> dict:
+    """Same report content as build_report_card, as a real popup modal
+    instead of replacing the Live screen -- sir's call: "Preparedness
+    report" should behave the same way here as it already does on the
+    fixed-plan path (cards/report_modal_v2.py), not open a separate new
+    full-screen card just because this run came from an AI scenario."""
+    card = build_report_card(run)
+    return {
+        "type": "modal",
+        "callback_id": "v2_ai_report_modal",
+        "title": {"type": "plain_text", "text": "Preparedness report"},
+        "close": {"type": "plain_text", "text": "Close"},
+        "blocks": card["blocks"],
+    }
 
 
-def _send_inject_dm(run: AIExerciseRun, inject: dict, bot_token: str) -> None:
+def _send_inject_dm(run: AIExerciseRun, inject: dict, bot_token: str, recipient: str | None = None, is_backup: bool = False) -> None:
     role = inject.get("target_role", "")
-    recipient = _resolve_recipient(run.team_id, role)
+    if not recipient:
+        recipient = _resolve_recipient(run.team_id, role)
     if not recipient:
         logger.info("AI run %s: no one currently holds role %r -- skipping inject %s", run.id, role, inject.get("inject_id"))
         _fire_next_inject(run, bot_token)
@@ -251,7 +372,10 @@ def _send_inject_dm(run: AIExerciseRun, inject: dict, bot_token: str) -> None:
         logger.exception("AI run %s: failed to open DM with %s", run.id, recipient)
         return
 
-    card = _build_inject_card(run, inject, recipient)
+    timer_min = inject.get("response_timer_min") or DEFAULT_RESPONSE_TIMER_MIN
+    due_at = datetime.datetime.utcnow() + datetime.timedelta(minutes=timer_min)
+
+    card = _build_inject_card(run, inject, recipient, due_at, is_backup=is_backup)
     try:
         resp = _call("chat.postMessage", bot_token, channel=dm_channel_id, text=inject.get("title", "Incident update"), **card)
     except SlackApiError:
@@ -262,14 +386,62 @@ def _send_inject_dm(run: AIExerciseRun, inject: dict, bot_token: str) -> None:
         run=run, inject_id=inject.get("inject_id", ""), decision_id=inject.get("decision_id", ""),
         assigned_slack_user_id=recipient, target_role=role,
         slack_channel_id=dm_channel_id, slack_message_ts=resp.get("ts", ""),
+        due_at=due_at, is_backup=is_backup,
     ).save()
 
 
-def _build_inject_card(run: AIExerciseRun, inject: dict, recipient: str) -> dict:
+def _history_blocks(run: AIExerciseRun) -> list:
+    """
+    Same real trail the old fixed-plan drill showed (sir's call): each new
+    decision card lists what's already been decided earlier in THIS run --
+    role, the question they were asked, and what they chose -- so the next
+    person has the same situational awareness a real incident would give
+    them, instead of deciding blind. Score/rating stay admin-only, never
+    shown here.
+    """
+    scenario = run.scenario
+    answered = list(AIDecisionResponse.objects(run=run, chosen_option__ne=None).order_by("sent_at"))
+    if not answered:
+        return []
+
+    lines = []
+    for d in answered:
+        inject = _find_inject(scenario, inject_id=d.inject_id)
+        option = next((o for o in (inject.get("options", []) if inject else []) if o.get("option") == d.chosen_option), None)
+        if not inject or not option:
+            continue
+        role_label = d.target_role or "?"
+        lines.append(f"✓ *{role_label}* — _{inject.get('decision_question', '')}_\n→ {option.get('option_text', '')}")
+
+    if not lines:
+        return []
+
+    blocks = [{"type": "context", "elements": [{"type": "mrkdwn", "text": "`DECISIONS SO FAR`"}]}]
+    # Chunked the same way the rest of this app's long lists are -- keeps
+    # each section block comfortably under Slack's 3000-char text limit
+    # even on a run with many prior decisions.
+    for chunk_start in range(0, len(lines), 4):
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n\n".join(lines[chunk_start:chunk_start + 4])}})
+    blocks.append({"type": "divider"})
+    return blocks
+
+
+def _build_inject_card(run: AIExerciseRun, inject: dict, recipient: str, due_at=None, is_backup: bool = False) -> dict:
+    headline = f":arrows_counterclockwise: {inject.get('title', 'Incident update')} — primary didn't respond in time" if is_backup else f":rotating_light: {inject.get('title', 'Incident update')}"
+
+    # Same real deadline display as the rest of this app's decision cards --
+    # Slack's <!date^...> renders in the VIEWER's own local timezone.
+    question_label = "`DECISION QUESTION`"
+    if due_at:
+        ts = int(due_at.replace(tzinfo=datetime.timezone.utc).timestamp())
+        question_label += f"   ·   :stopwatch: Respond by <!date^{ts}^{{date_short_pretty}} at {{time}}|the deadline>"
+
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": f":rotating_light: {inject.get('title', 'Incident update')}", "emoji": True}},
+        *_history_blocks(run),
+        {"type": "header", "text": {"type": "plain_text", "text": headline, "emoji": True}},
         {"type": "section", "text": {"type": "mrkdwn", "text": inject.get("inject_message", "")}},
         {"type": "divider"},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": question_label}]},
         {"type": "section", "text": {"type": "mrkdwn", "text": f"*{inject.get('decision_question', '')}*"}},
     ]
     elements = []
@@ -332,11 +504,91 @@ def handle_decision(payload: dict, bot_token: str) -> None:
         except SlackApiError:
             logger.exception("AI run %s: failed to update inject message with feedback", run.id)
 
+    # Confirmed live: a "Poor" answer with a consequence attached sent
+    # that one informational DM and then the drill just stopped dead --
+    # nothing here ever continued on to the next real Main inject,
+    # because this used to `return` right after the consequence instead
+    # of falling through to _fire_next_inject like every other path
+    # does. The consequence has no decision of its own to wait on, so
+    # there's nothing to block the sequence continuing right after it.
     trigger_id = opt.get("triggers_inject", "-")
     if trigger_id and trigger_id != "-":
         consequence = _find_inject(scenario, inject_id=trigger_id)
         if consequence:
             _send_inject_dm(run, consequence, bot_token)
-            return
 
     _fire_next_inject(run, bot_token)
+
+
+def escalate_overdue_ai_decisions() -> int:
+    """
+    Real timeout handling for AI-generated drill decisions, same rule as
+    the old fixed-plan drill: past its real due_at and still unanswered,
+    page the real backup for that role with the same inject, or (no
+    backup, or the backup also missed it) auto-resolve it as a missed
+    decision -- scored as the worst real option on file -- and let the
+    chain continue rather than hanging the drill forever. Meant to be
+    called on a recurring timer (see exercises/apps.py).
+    """
+    from workspaces.models import get_bot_token
+
+    overdue = AIDecisionResponse.objects(chosen_option=None, escalated=False, due_at__lt=datetime.datetime.utcnow())
+
+    count = 0
+    for response in overdue:
+        response.escalated = True
+        response.save()
+
+        run = response.run
+        if not run or run.status != RUN_STATUS_RUNNING:
+            continue
+
+        bot_token = get_bot_token(run.team_id)
+        if not bot_token:
+            continue
+
+        scenario = run.scenario
+        inject = _find_inject(scenario, inject_id=response.inject_id)
+        if not inject:
+            continue
+
+        backup_id = None
+        if not response.is_backup:
+            backup_id = _resolve_backup(run.team_id, response.target_role, response.assigned_slack_user_id)
+
+        if backup_id:
+            _send_inject_dm(run, inject, bot_token, recipient=backup_id, is_backup=True)
+        else:
+            # No real backup to page (or the backup already missed it too)
+            # -- honest "nobody decided" outcome, worst score on file.
+            response.timed_out = True
+            response.chosen_option = ""
+            response.score = 0
+            response.rating = "Poor"
+            response.responded_at = datetime.datetime.utcnow()
+            response.save()
+
+            if response.slack_channel_id and response.slack_message_ts:
+                try:
+                    _call(
+                        "chat.update",
+                        bot_token,
+                        channel=response.slack_channel_id,
+                        ts=response.slack_message_ts,
+                        text="Decision timed out",
+                        blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": ":hourglass: *This decision timed out* — no response was recorded in time."}}],
+                    )
+                except SlackApiError:
+                    logger.exception("Failed to update timed-out AI decision DM for response %s", response.id)
+
+            consequence_trigger = next((o.get("triggers_inject") for o in inject.get("options", []) if o.get("rating") == "Poor"), None)
+            if consequence_trigger and consequence_trigger != "-":
+                consequence = _find_inject(scenario, inject_id=consequence_trigger)
+                if consequence:
+                    _send_inject_dm(run, consequence, bot_token)
+
+            _fire_next_inject(run, bot_token)
+
+        count += 1
+
+    return count

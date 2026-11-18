@@ -31,33 +31,17 @@ class ExercisesConfig(AppConfig):
             # Import inside the thread, not at module load -- avoids
             # touching Django/Mongo models before the app registry (and
             # the Mongo connection) has finished setting up.
-            from .drill import escalate_overdue_tasks, fire_due_scheduled_exercises
-            from cards.inject_drill_v2 import escalate_overdue_decisions
             from cards.role_reminders_v2 import check_backup_timeout_activation, check_role_reminders, check_leavers
-            from cards.ai_drill_v2 import check_scheduled_ai_runs
+            from cards.ai_drill_v2 import check_scheduled_ai_runs, escalate_overdue_ai_decisions
 
             while True:
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 try:
-                    count = escalate_overdue_tasks()
-                    if count:
-                        logger.info("Escalated %d overdue drill task(s) to backup", count)
-                except Exception:
-                    logger.exception("Drill escalation check failed")
-
-                try:
-                    fired = fire_due_scheduled_exercises()
-                    if fired:
-                        logger.info("Fired %d scheduled exercise(s)", fired)
-                except Exception:
-                    logger.exception("Scheduled exercise check failed")
-
-                try:
-                    decisions_count = escalate_overdue_decisions()
+                    decisions_count = escalate_overdue_ai_decisions()
                     if decisions_count:
-                        logger.info("Escalated/timed out %d overdue decision(s)", decisions_count)
+                        logger.info("Escalated/timed out %d overdue AI decision(s)", decisions_count)
                 except Exception:
-                    logger.exception("Decision escalation check failed")
+                    logger.exception("AI decision escalation check failed")
 
                 try:
                     reminders_count = check_role_reminders()

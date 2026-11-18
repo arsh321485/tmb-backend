@@ -314,3 +314,5 @@ ROLE_ACTIVITIES = [
 def activities_for_role(team_id: str, role: str) -> list:
     """Every activity row for one (team_id, role), in phase order."""
     return [a for a in ROLE_ACTIVITIES if a["team_id"] == team_id and a["role"] == role]
+
+

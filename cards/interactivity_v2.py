@@ -20,21 +20,16 @@ import requests
 from workspaces.models import get_bot_token
 
 from . import inject_modal_v2
-from . import report_modal_v2
 from . import team_role_modal_v2
 from .admins_v2_data import build_admins_card
 from .admins_v2_data import read_current_state as read_admins_state
 from .bia_upload_v2_data import build_bia_upload_card
 from .nav_v2 import with_nav_bar_v2
 from .slack_members_v2 import get_workspace_people
-from .scenario_v2_data import build_scenario_card
 from . import teams_v2_data
 from .teams_v2_data import ADD_CUSTOM_ROLE_VALUE, build_teams_card
 from .teams_v2_data import read_current_state as read_teams_state
-from .test_plan_v2_data import build_real_test_plan_card, build_test_plan_card
-from .threat_map_v2_data import build_threat_map_card
 from .threats_v2_data import build_org_threats_card, read_current_state
-from .trigger_v2_data import build_live_card, build_trigger_card
 from . import user_flow_test
 from .user_nav_test import with_nav_bar_user_test
 from . import persistence_v2
@@ -52,7 +47,28 @@ def _load_v2_card(filename: str, **replacements) -> dict:
     return json.loads(text)
 
 
-def _replace_message(response_url: str, card: dict) -> None:
+def _replace_message(response_url: str, card: dict, bot_token: str = "", channel_id: str = "", message_ts: str = "") -> None:
+    # Slack only accepts 5 response_url posts per 30 minutes, total,
+    # across every click on that one message. Threat Mapping's own
+    # drill-down (Module -> Severity tab -> Threat tab -> Incident tab)
+    # already burns through several of those before "Build scenario" is
+    # even reached -- confirmed live: clicking Build scenario after
+    # drilling down silently did nothing, no error shown anywhere,
+    # because the response_url had already hit its limit. chat.update
+    # (channel + the message's own ts) has no such limit, so it's used
+    # whenever the caller has those on hand; response_url stays as the
+    # fallback for callers that don't.
+    if bot_token and channel_id and message_ts:
+        resp = requests.post(
+            "https://slack.com/api/chat.update",
+            headers={"Authorization": f"Bearer {bot_token}"},
+            json={"channel": channel_id, "ts": message_ts, **card},
+            timeout=10,
+        )
+        body = resp.json() if resp.content else {}
+        if body.get("ok") is not True:
+            logger.warning("chat.update was not accepted (status=%s): %s", resp.status_code, str(body)[:500])
+        return
     # response_url posts return HTTP 200 with either a plain "ok" text
     # body OR a JSON {"ok": true} body (Slack is inconsistent about
     # which) even when the card itself is rejected (e.g. invalid_blocks)
@@ -72,7 +88,7 @@ def _replace_message(response_url: str, card: dict) -> None:
     logger.warning("response_url post was not accepted (status=%s): %s", resp.status_code, body[:500])
 
 
-def _redraw_threats(response_url: str, state: dict, slack_team_id: str = "") -> None:
+def _redraw_threats(response_url: str, state: dict, slack_team_id: str = "", bot_token: str = "", channel_id: str = "", message_ts: str = "") -> None:
     from . import org_setup_v2
 
     if slack_team_id:
@@ -102,29 +118,36 @@ def _redraw_threats(response_url: str, state: dict, slack_team_id: str = "") -> 
         persistence_v2.save_threat_profile_nav(slack_team_id, state)
         persistence_v2.save_visited_combos(slack_team_id, state["visited_combos"])
 
-    _replace_message(response_url, with_nav_bar_v2(card, "org_threats"))
+    _replace_message(response_url, with_nav_bar_v2(card, "org_threats"), bot_token, channel_id, message_ts)
 
 
-def _breadcrumb_from_nav(nav: dict) -> dict:
+def _breadcrumb_from_nav(nav: dict, team_id: str = "") -> dict:
     """Turns the saved threat_profile_nav ids back into display labels --
     same lookup v2_nav_jump__test_plan already does, factored out so the
     Configure Test phase/scenario tab clicks (which only have the nav,
-    not the full Threat Profile message) can show the same breadcrumb."""
-    from .threat_map_v2_data import _find_threat
-    from .threats_v2_data import THREATS
+    not the full Threat Profile message) can show the same breadcrumb.
+
+    Confirmed live: this used to only check the OLD fixed taxonomy
+    (threats_v2_data.THREATS / threat_map_v2_data._find_threat) -- for
+    any AI-generated threat (not in that fixed list, which is almost
+    every real org threat now) it silently fell back to the raw snake_
+    case keys/ids instead of the real names, e.g. "client_data_integrity_
+    attack" / "skewed_metrics" instead of "Client Data Integrity
+    Tampering" / "Inaccurate BI Reporting". Looked "random" because it
+    only broke depending on which taxonomy that particular threat came
+    from, not on anything the admin did differently. resolve_names
+    already checks BOTH taxonomies correctly (used by Configure Test's
+    own cause generation) -- reused here instead of duplicating a second,
+    incomplete lookup."""
+    from .threat_profile_review_v2 import resolve_names
 
     active_module = nav.get("active_module")
     raw_key = nav.get("active_threat")
-    threat_label = next((t["label"] for t in THREATS if t["key"] == raw_key), raw_key)
-    incident_name, cause_name = nav.get("active_incident"), nav.get("active_cause")
-    taxonomy_threat = _find_threat(active_module, raw_key) if active_module and raw_key else None
-    if taxonomy_threat:
-        incident = next((inc for inc in taxonomy_threat["incidents"] if inc["id"] == nav.get("active_incident")), None)
-        if incident:
-            incident_name = incident["name"]
-            cause = next((c for c in incident["causes"] if c["id"] == nav.get("active_cause")), None)
-            if cause:
-                cause_name = cause["name"]
+    threat_label, incident_name, cause_name = raw_key, nav.get("active_incident"), nav.get("active_cause")
+    if active_module and raw_key:
+        threat_label, incident_name, cause_name = resolve_names(
+            team_id, active_module, raw_key, nav.get("active_incident") or "", nav.get("active_cause") or "",
+        )
     return {
         "module": active_module, "crit": nav.get("active_crit"), "threat": threat_label,
         "incident": incident_name, "cause": cause_name,
@@ -136,8 +159,8 @@ def _redraw_admins(response_url: str, bot_token: str, current_user_id: str, stat
     _replace_message(response_url, with_nav_bar_v2(build_admins_card(state, people, current_user_id), "admins"))
 
 
-def _redraw_bia_upload(response_url: str, slack_team_id: str, channel_id: str = "", message_ts: str = "") -> None:
-    _replace_message(response_url, with_nav_bar_v2(build_bia_upload_card(slack_team_id), "bia_upload"))
+def _redraw_bia_upload(response_url: str, slack_team_id: str, channel_id: str = "", message_ts: str = "", user_id: str = "", bot_token: str = "") -> None:
+    _replace_message(response_url, with_nav_bar_v2(build_bia_upload_card(slack_team_id, user_id, bot_token), "bia_upload"))
     if slack_team_id and channel_id and message_ts:
         persistence_v2.save_bia_upload_card_location(slack_team_id, channel_id, message_ts)
 
@@ -147,11 +170,6 @@ def _redraw_teams(response_url: str, bot_token: str, state: dict, slack_team_id:
     _replace_message(response_url, with_nav_bar_v2(build_teams_card(state, people, slack_team_id=slack_team_id), "teams"))
     if slack_team_id and channel_id and message_ts:
         persistence_v2.save_teams_card_location(slack_team_id, channel_id, message_ts)
-
-
-def _redraw_map(response_url: str, module: str, expanded_threat: str = "", expanded_incident: str = "") -> None:
-    card = build_threat_map_card(module, expanded_threat, expanded_incident)
-    _replace_message(response_url, with_nav_bar_v2(card, "threat_map"))
 
 
 def handle_block_action_v2(payload: dict) -> None:
@@ -167,6 +185,112 @@ def handle_block_action_v2(payload: dict) -> None:
     bot_token = get_bot_token(slack_team_id)
     top_channel_id = payload.get("channel", {}).get("id", "")
     top_message_ts = payload.get("message", {}).get("ts", "")
+
+    if action_id == "v2_orgsetup_continue":
+        from . import threat_profile_review_v2
+
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"))
+        return
+
+    if action_id == "v2_nav_jump__threat_review":
+        from . import threat_profile_review_v2
+
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"))
+        return
+
+    if action_id.startswith("v2_tpreview_module_tab__"):
+        from . import threat_profile_review_v2
+
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=action.get("value", "")), "threat_review"))
+        return
+
+    if action_id == "v2_tpreview_retry":
+        from . import threat_profile_review_v2
+
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"))
+        return
+
+    if action_id == "v2_tpreview_regenerate":
+        from . import threat_profile_review_v2
+
+        threat_profile_review_v2.regenerate_profile(slack_team_id)
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"))
+        return
+
+    if action_id == "v2_tpreview_approve":
+        from . import threat_profile_review_v2
+        from .bia_upload_v2_data import build_bia_question_card, _latest_plan
+
+        threat_profile_review_v2.approve_profile(slack_team_id)
+        if slack_team_id and _latest_plan(slack_team_id) is not None:
+            _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts, current_user_id, bot_token)
+        else:
+            _replace_message(response_url, with_nav_bar_v2(build_bia_question_card(), "bia_upload"))
+            if slack_team_id and top_channel_id and top_message_ts:
+                persistence_v2.save_bia_upload_card_location(slack_team_id, top_channel_id, top_message_ts)
+        return
+
+    if action_id == "v2_tpreview_reopen":
+        from . import threat_profile_review_v2
+
+        threat_profile_review_v2.reopen_profile(slack_team_id)
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"))
+        return
+
+    if action_id == "v2_tpreview_remove_select":
+        from . import threat_profile_review_v2
+
+        key = (action.get("selected_option") or {}).get("value", "")
+        if key:
+            threat_profile_review_v2.remove_threat(slack_team_id, key)
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"))
+        return
+
+    if action_id.startswith("v2_tpreview_remove__"):
+        from . import threat_profile_review_v2
+
+        key = action_id.removeprefix("v2_tpreview_remove__")
+        threat_profile_review_v2.remove_threat(slack_team_id, key)
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"))
+        return
+
+    if action_id == "v2_tpreview_add":
+        from . import threat_profile_review_v2
+
+        trigger_id = payload.get("trigger_id", "")
+        if trigger_id and bot_token:
+            requests.post(
+                "https://slack.com/api/views.open",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                json={"trigger_id": trigger_id, "view": threat_profile_review_v2.build_add_modal_view(top_channel_id, top_message_ts)},
+                timeout=10,
+            )
+        return
+
+    if action_id == "v2_tpreview_edit":
+        from . import threat_profile_review_v2
+
+        trigger_id = payload.get("trigger_id", "")
+        module = action.get("value", "")
+        if trigger_id and bot_token:
+            requests.post(
+                "https://slack.com/api/views.open",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                json={
+                    "trigger_id": trigger_id,
+                    "view": threat_profile_review_v2.build_edit_modal_view(slack_team_id, module, top_channel_id, top_message_ts),
+                },
+                timeout=10,
+            )
+        return
 
     if action_id.startswith("v2_tc_module_tab__") or action_id.startswith("v2_tc_crit_tab__") or action_id.startswith("v2_tc_threat_tab__"):
         from .threats_center_v2 import build_threats_center_card, read_current_state as read_tc_state
@@ -187,7 +311,6 @@ def handle_block_action_v2(payload: dict) -> None:
 
     if action_id == "v2_tc_launch":
         from . import org_setup_v2
-        from .threats_v2_data import build_org_threats_card
 
         value = action.get("value", "")
         active_module, active_crit, active_threat = (value.split("|", 2) + ["", "", ""])[:3]
@@ -338,7 +461,7 @@ def handle_block_action_v2(payload: dict) -> None:
                 if c["module"] == module and c["label"] == label:
                     c["crit"] = new_value
         persistence_v2.save_threats_state(slack_team_id, state)
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_threat_module_tab__"):
@@ -346,7 +469,7 @@ def handle_block_action_v2(payload: dict) -> None:
         saved = persistence_v2.load_threats_state(slack_team_id)
         state["fixed"], state["custom"] = saved["fixed"], saved["custom"]
         state["active_module"] = action.get("value", "Cybersecurity")
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_threat_crit_tab__"):
@@ -354,7 +477,7 @@ def handle_block_action_v2(payload: dict) -> None:
         saved = persistence_v2.load_threats_state(slack_team_id)
         state["fixed"], state["custom"] = saved["fixed"], saved["custom"]
         state["active_crit"] = action.get("value", "")
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_threat_name_tab__"):
@@ -362,7 +485,7 @@ def handle_block_action_v2(payload: dict) -> None:
         saved = persistence_v2.load_threats_state(slack_team_id)
         state["fixed"], state["custom"] = saved["fixed"], saved["custom"]
         state["active_threat"] = action.get("value", "")
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_threat_incident_tab__"):
@@ -370,14 +493,14 @@ def handle_block_action_v2(payload: dict) -> None:
         saved = persistence_v2.load_threats_state(slack_team_id)
         state["fixed"], state["custom"] = saved["fixed"], saved["custom"]
         state["active_incident"] = action.get("value", "")
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     # "+ Add a threat we missed" -- opens the inline form.
     if action_id == "v2_threat_add_open":
         state = read_current_state(message_blocks)
         state["form"] = {"module": None, "threat": None, "crit": None}
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_threat_add_module_select":
@@ -386,7 +509,7 @@ def handle_block_action_v2(payload: dict) -> None:
         # Changing the module resets the threat pick -- the previous
         # threat came from the OTHER module's catalog.
         state["form"] = {"module": new_module, "threat": None, "crit": (state.get("form") or {}).get("crit")}
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_threat_add_threat_select":
@@ -395,7 +518,7 @@ def handle_block_action_v2(payload: dict) -> None:
         form = state.get("form") or {}
         form["threat"] = None if value == "__none__" else value
         state["form"] = form
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_threat_add_crit__"):
@@ -403,7 +526,7 @@ def handle_block_action_v2(payload: dict) -> None:
         form = state.get("form") or {}
         form["crit"] = action_id.removeprefix("v2_threat_add_crit__")
         state["form"] = form
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_threat_add_confirm":
@@ -424,13 +547,13 @@ def handle_block_action_v2(payload: dict) -> None:
                 state["custom"].append({"module": form["module"], "label": form["threat"], "crit": form["crit"]})
         state["form"] = None
         persistence_v2.save_threats_state(slack_team_id, state)
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_threat_add_cancel":
         state = read_current_state(message_blocks)
         state["form"] = None
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_threat_cause_tab__"):
@@ -440,7 +563,7 @@ def handle_block_action_v2(payload: dict) -> None:
         state["active_cause"] = action.get("value", "")
         state["active_phase"] = None
         state["active_scenario"] = None
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_threat_phase_tab__"):
@@ -450,7 +573,7 @@ def handle_block_action_v2(payload: dict) -> None:
         _, plan_id, phase = action_id.split("__", 2)
         state["active_phase"] = phase
         state["active_scenario"] = None
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id.startswith("v2_threat_scenario_tab__"):
@@ -460,102 +583,121 @@ def handle_block_action_v2(payload: dict) -> None:
         _, plan_id, phase, scenario = action_id.split("__", 3)
         state["active_phase"] = phase
         state["active_scenario"] = scenario
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
-    # "TestMyPlan" on Threat Profile's Incident view -- hands off to Step
-    # 6 · Configure Test (cards/test_plan_v2_data.py's
-    # build_configure_test_card), which now picks Cause, Phase AND
-    # Scenario (sir's call -- Cause moved off Threat Profile, onto this
-    # screen, same place Phase/Scenario already lived).
-    if action_id == "v2_threat_configure_test":
-        from .test_plan_v2_data import build_configure_test_card
-
+    if action_id == "v2_cfgtest_run_incident":
+        # Incident-wide testing (sir's call): one button writes (or
+        # reuses) every Cause's own scenario under this Incident, merges
+        # them into a single combined drill, and shows it for review --
+        # no more picking one Cause at a time.
         data = json.loads(action.get("value", "{}"))
-        card = build_configure_test_card(
-            data.get("module", ""), data.get("threat_key", ""), data.get("incident_id", ""),
-            "", "", "", data.get("breadcrumb", {}), team_id=slack_team_id,
-        )
-        _replace_message(response_url, with_nav_bar_v2(card, "test_plan"))
-        return
+        module, threat_key, incident_id = data.get("module", ""), data.get("threat_key", ""), data.get("incident_id", "")
+        breadcrumb = data.get("breadcrumb", {})
 
-    if action_id.startswith(("v2_cfgtest_cause_tab__", "v2_cfgtest_phase_tab__", "v2_cfgtest_scenario_tab__")):
-        from .test_plan_v2_data import build_configure_test_card
+        message_blocks = payload.get("message", {}).get("blocks", [])
+        threats_state = read_current_state(message_blocks)
+        threats_saved = persistence_v2.load_threats_state(slack_team_id) if slack_team_id else {"fixed": {}, "custom": []}
+        threats_state["fixed"], threats_state["custom"] = threats_saved["fixed"], threats_saved["custom"]
 
-        data = json.loads(action.get("value", "{}"))
-        card = build_configure_test_card(
-            data.get("module", ""), data.get("threat_key", ""), data.get("incident_id", ""),
-            data.get("cause", ""), data.get("phase", ""), data.get("scenario", ""),
-            data.get("breadcrumb", {}), team_id=slack_team_id,
-        )
-        _replace_message(response_url, with_nav_bar_v2(card, "test_plan"))
+        if response_url:
+            # Instant feedback before the slow AI calls below even start
+            # -- same reasoning as the old per-cause loading state, just
+            # for every cause in this incident at once now. Redraws the
+            # SAME Threat Mapping screen the admin is already looking at
+            # (causes list, button, breadcrumb all still there) with just
+            # a status note added -- no separate screen swap -- sir's call.
+            loading_card = build_org_threats_card(threats_state, team_id=slack_team_id)
+            loading_card["blocks"].append({
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": ":hourglass_flowing_sand: Writing the scenario for this incident -- this can take a minute or two."}],
+            })
+            _replace_message(response_url, with_nav_bar_v2(loading_card, "org_threats"), bot_token, top_channel_id, top_message_ts)
 
-        # A real popup (sir's call), not text on the Step 6 screen --
-        # opened alongside the redraw above, using this same click's
-        # trigger_id (only valid for this one interaction).
-        if action_id.startswith("v2_cfgtest_cause_tab__"):
-            from .cause_awareness_modal_v2 import open_modal
+        from .incident_test_v2 import get_or_generate_incident_scenario, send_awareness_dms
+        from .threat_map_v2_data import _find_threat
+        from .threat_profile_review_v2 import ensure_threat_map
 
-            trigger_id = payload.get("trigger_id", "")
-            cause_id = data.get("cause", "")
-            if trigger_id and cause_id and bot_token:
-                open_modal(trigger_id, cause_id, bot_token)
-        return
+        taxonomy_threat = _find_threat(module, threat_key) if module and threat_key else None
+        incidents = (taxonomy_threat or {}).get("incidents", [])
+        if not incidents and slack_team_id and threat_key:
+            incidents = ensure_threat_map(slack_team_id, threat_key)
+        incident = next((i for i in incidents if i["id"] == incident_id), None)
+        causes = incident["causes"] if incident else []
 
-    if action_id == "v2_threat_trigger":
-        # Step 6 "Test plan" review screen removed (sir's call) -- Launch
-        # test now goes straight to arming + Training mode, same as the
-        # TestMyPlan tab's own v2_plan_arm_real already does.
-        import datetime
+        if causes and slack_team_id and bot_token:
+            # Instant (no AI call -- the what/why is already written and
+            # cached) -- fires before the slow scenario generation below
+            # so the team hears about this incident right away, not only
+            # once the (10-30s+) AI write finishes.
+            send_awareness_dms(slack_team_id, module, threat_key, incident_id, causes, bot_token)
 
-        breadcrumb = json.loads(action.get("value", "{}"))
-        plan_id, phase, scenario = breadcrumb["plan_id"], breadcrumb["phase"], breadcrumb["scenario"]
-        persistence_v2.save_scenario_selection(
-            slack_team_id, plan_id, scenario_id=scenario, phase=phase, armed=True, armed_at=datetime.datetime.utcnow()
-        )
-        from .trigger_v2_data import build_training_mode_card
+        combined = get_or_generate_incident_scenario(slack_team_id, module, threat_key, incident_id, causes) if causes else None
 
-        card = build_training_mode_card(plan_id, scenario)
-        _replace_message(response_url, with_nav_bar_v2(card, "trigger"))
-        return
+        if combined:
+            from .scenario_v2_data import build_scenario_review_card
 
-    if action_id == "v2_plan_view_summary":
-        payload_data = json.loads(action.get("value", "{}"))
-        from .test_plan_v2_data import build_plan_summary_card
-
-        card = build_plan_summary_card(
-            payload_data["plan_id"], slack_team_id=slack_team_id, bot_token=bot_token,
-            back_phase=payload_data.get("phase", ""), back_scenario=payload_data.get("scenario", ""),
-            breadcrumb=payload_data.get("breadcrumb"),
-        )
-        _replace_message(response_url, with_nav_bar_v2(card, "test_plan"))
-        return
-
-    if action_id == "v2_plan_summary_back":
-        payload_data = json.loads(action.get("value", "{}"))
-        card = build_real_test_plan_card(
-            payload_data["plan_id"], payload_data["phase"], payload_data["scenario"],
-            breadcrumb=payload_data.get("breadcrumb"), slack_team_id=slack_team_id, bot_token=bot_token,
-        )
-        _replace_message(response_url, with_nav_bar_v2(card, "test_plan"))
+            scenario_breadcrumb = "  ›  ".join(
+                v for v in (breadcrumb.get("module"), breadcrumb.get("crit"), breadcrumb.get("threat"), breadcrumb.get("incident")) if v
+            )
+            card = build_scenario_review_card(combined, scenario_breadcrumb)
+        else:
+            card = build_org_threats_card(threats_state, team_id=slack_team_id)
+            card["blocks"].append({
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "_Couldn't write a scenario for this incident -- this can happen when the AI provider is briefly overloaded, not just when a plan/roles are missing. Try again._"}],
+            })
+        _replace_message(response_url, with_nav_bar_v2(card, "org_threats"), bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_nav_jump__org_threats":
         state = persistence_v2.load_threats_state(slack_team_id)
-        _redraw_threats(response_url, state, slack_team_id)
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_nav_jump__trigger":
-        from .models_v2 import ScenarioSelection
-        from .trigger_v2_data import build_training_mode_card
+        from .models_v2 import AIExerciseRun, GeneratedScenario, RUN_STATUS_RUNNING, RUN_STATUS_SCHEDULED
 
-        sel = (
-            ScenarioSelection.objects(team_id=slack_team_id, armed=True).order_by("-armed_at").first()
+        # Confirmed live: coming back to this tab mid-drill (e.g. after
+        # checking Teams & Roles) re-asked "Training mode?" for some
+        # OTHER approved-but-unrun scenario instead of showing the
+        # drill that's actually running -- the only way to reach the
+        # Preparedness report was a response_url left over from before
+        # navigating away. An active run always wins over anything else
+        # here, since there's nothing else to meaningfully do on this
+        # tab while one is in progress.
+        active_run = (
+            AIExerciseRun.objects(team_id=slack_team_id, status__in=[RUN_STATUS_RUNNING, RUN_STATUS_SCHEDULED])
+            .order_by("-started_at")
+            .first()
             if slack_team_id
             else None
         )
-        if sel:
-            card = build_training_mode_card(sel.module, sel.scenario_id)
+
+        # An approved AI scenario that hasn't been run yet asks "Training
+        # mode?" here too, not just right after Approve, so coming back
+        # to this tab later still finds it.
+        approved_ai_scenario = None
+        if slack_team_id and active_run is None:
+            for candidate in GeneratedScenario.objects(team_id=slack_team_id, status="approved").order_by("-approved_at"):
+                if AIExerciseRun.objects(scenario=candidate).first() is None:
+                    approved_ai_scenario = candidate
+                    break
+
+        if active_run is not None:
+            from . import ai_drill_v2
+
+            # Keep this the one real "Live" location for the run, so a
+            # later auto-completion can update THIS message in place
+            # instead of posting a separate new one.
+            if top_channel_id and top_message_ts:
+                active_run.live_channel_id, active_run.live_message_ts = top_channel_id, top_message_ts
+                active_run.save()
+            card = ai_drill_v2.build_run_status_card(active_run, active_run.scenario)
+        elif approved_ai_scenario:
+            from . import ai_drill_v2
+
+            card = ai_drill_v2.build_trigger_picker_card(approved_ai_scenario)
         else:
             card = {
                 "blocks": [
@@ -665,14 +807,26 @@ def handle_block_action_v2(payload: dict) -> None:
         _redraw_admins(response_url, bot_token, current_user_id, state)
         return
 
-    # "Continue" -- advances to the BIA/BCP upload step. A plan already
-    # on file means they already answered "Yes" by uploading it -- skip
-    # straight to the status screen instead of asking again.
-    if action_id in ("v2_admins_done", "v2_nav_jump__bia_upload"):
+    # "Continue" on Admins -- advances to Threat Approval (Agent 1)
+    # instead of straight to BIA/BCP upload, since the threat profile
+    # only needs the sign-up form data, not an uploaded plan.
+    if action_id == "v2_admins_done":
+        from . import threat_profile_review_v2
+
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"))
+        return
+
+    # Clicking the "Upload & Analysis" nav tab directly still jumps
+    # straight there, independent of where Admins' own Continue goes.
+    # A plan already on file means they already answered "Yes" by
+    # uploading it -- skip straight to the status screen instead of
+    # asking again.
+    if action_id == "v2_nav_jump__bia_upload":
         from .bia_upload_v2_data import build_bia_question_card, _latest_plan
 
         if slack_team_id and _latest_plan(slack_team_id) is not None:
-            _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts)
+            _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts, current_user_id, bot_token)
         else:
             # Save the location here too (not just once a plan exists) so
             # a draft generated from the "No BCP" branch, which starts
@@ -682,8 +836,8 @@ def handle_block_action_v2(payload: dict) -> None:
                 persistence_v2.save_bia_upload_card_location(slack_team_id, top_channel_id, top_message_ts)
         return
 
-    if action_id == "v2_bia_have_doc_yes":
-        _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts)
+    if action_id in ("v2_bia_have_doc_yes", "v2_bia_check_again"):
+        _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts, current_user_id, bot_token)
         return
 
     if action_id == "v2_bia_have_doc_no":
@@ -740,6 +894,16 @@ def handle_block_action_v2(payload: dict) -> None:
             open_modal(trigger_id, plan, bot_token, top_channel_id, top_message_ts)
         return
 
+    if action_id == "v2_bia_add_service":
+        from .bia_upload_v2_data import _latest_plan
+        from .add_service_modal_v2 import open_modal
+
+        trigger_id = payload.get("trigger_id", "")
+        plan = _latest_plan(slack_team_id) if slack_team_id else None
+        if trigger_id and plan and bot_token:
+            open_modal(trigger_id, plan, bot_token, top_channel_id, top_message_ts)
+        return
+
     if action_id == "v2_bia_refresh":
         from .bia_upload_v2_data import _latest_plan, build_draft_failed_card, build_draft_requested_card
         from .models_v2 import DraftBiaRequest
@@ -752,14 +916,14 @@ def handle_block_action_v2(payload: dict) -> None:
         if draft_request and no_plan_yet and draft_request.status == "requested":
             _replace_message(response_url, with_nav_bar_v2(build_draft_requested_card(slack_team_id), "bia_upload"))
             return
-        _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts)
+        _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts, current_user_id, bot_token)
         return
 
     # "Make changes" -- loops back to the upload step, same shape as the
     # BIA/BCP-available No-branch and the org-details approval No-branch
     # elsewhere in this flow (sir's flowchart: "No -- again change and show").
     if action_id == "v2_ai_changes":
-        _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts)
+        _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts, current_user_id, bot_token)
         return
 
     if action_id == "v2_ai_approve":
@@ -771,7 +935,30 @@ def handle_block_action_v2(payload: dict) -> None:
             plan.save()
         # Nav order is Upload & Analysis -> Teams -> Threat Profile, so
         # Approve continues to Teams next, not straight to Threat Profile.
-        _redraw_teams(response_url, bot_token, persistence_v2.load_teams_state(slack_team_id), slack_team_id, top_channel_id, top_message_ts)
+        #
+        # Posts Teams as a NEW message instead of editing this one in
+        # place -- sir's call: editing in place keeps the viewer's
+        # scroll position wherever they clicked (often partway down a
+        # long card), a real Slack client behavior the API can't
+        # override. A new message pulls Slack's scroll down to it,
+        # landing at its own top instead. Falls back to the old
+        # in-place edit if the repost itself fails for any reason.
+        try:
+            from .slack_client import SlackApiError, _call
+
+            people = get_workspace_people(bot_token)
+            teams_card = with_nav_bar_v2(build_teams_card(persistence_v2.load_teams_state(slack_team_id), people, slack_team_id=slack_team_id), "teams")
+            new_msg = _call("chat.postMessage", bot_token, channel=top_channel_id, **teams_card)
+            new_ts = new_msg.get("ts", "")
+            if not new_ts:
+                raise SlackApiError("no ts returned")
+            if top_message_ts:
+                _call("chat.delete", bot_token, channel=top_channel_id, ts=top_message_ts)
+            if slack_team_id:
+                persistence_v2.save_teams_card_location(slack_team_id, top_channel_id, new_ts)
+        except SlackApiError:
+            logger.exception("Couldn't repost Teams as a new message for team %s -- falling back to in-place edit", slack_team_id)
+            _redraw_teams(response_url, bot_token, persistence_v2.load_teams_state(slack_team_id), slack_team_id, top_channel_id, top_message_ts)
         return
 
     if action_id == "v2_nav_jump__teams":
@@ -1298,106 +1485,7 @@ def handle_block_action_v2(payload: dict) -> None:
         # through to the end of the function. This was the real root
         # cause of the button looking like it "did nothing."
         state = persistence_v2.load_threats_state(slack_team_id)
-        _redraw_threats(response_url, state, slack_team_id)
-        return
-
-    if action_id == "v2_nav_jump__threat_map":
-        _redraw_map(response_url, "Cybersecurity")
-        return
-
-    if action_id.startswith("v2_map_jump__"):
-        module, _, threat_id = action.get("value", "").partition(":")
-        _redraw_map(response_url, module, threat_id)
-        return
-
-    if action_id.startswith("v2_map_module__"):
-        _redraw_map(response_url, action.get("value", ""))
-        return
-
-    if action_id.startswith("v2_map_expand_threat__"):
-        module, _, threat_id = action.get("value", "").partition(":")
-        _redraw_map(response_url, module, threat_id)
-        return
-
-    if action_id.startswith("v2_map_expand_incident__"):
-        module, threat_id, incident_id = action.get("value", "").split(":")
-        _redraw_map(response_url, module, threat_id, incident_id)
-        return
-
-    if action_id.startswith("v2_map_pick_scenario__"):
-        module, threat_id, incident_id, cause_id, scenario = action.get("value", "").split(":", 4)
-        # Save the drill-down path as soon as a cause is picked -- so even
-        # if nobody finishes picking an exact scenario yet, we don't lose
-        # how far they got.
-        persistence_v2.save_scenario_selection(
-            slack_team_id, module, threat_id=threat_id, incident_id=incident_id, cause_id=cause_id, scenario_id=""
-        )
-        card = build_scenario_card(module, threat_id, incident_id, cause_id)
-        _replace_message(response_url, with_nav_bar_v2(card, "threat_map"))
-        return
-
-    if action_id.startswith("v2_scenario_pick__"):
-        module, threat_id, incident_id, cause_id, scenario = action.get("value", "").split(":", 4)
-        persistence_v2.save_scenario_selection(
-            slack_team_id, module, threat_id=threat_id, incident_id=incident_id, cause_id=cause_id, scenario_id=scenario
-        )
-        card = build_scenario_card(module, threat_id, incident_id, cause_id, selected=scenario)
-        _replace_message(response_url, with_nav_bar_v2(card, "org_threats"))
-        return
-
-    if action_id in ("v2_threat_scenario_generate", "v2_threat_scenario_review"):
-        from .scenario_v2_data import _breadcrumb, build_generating_card, build_scenario_failed_card, build_scenario_review_card
-        from .threat_map_v2_data import _find_incident, _find_threat
-        from .models_v2 import GeneratedScenario
-        from plans.scenario_generator import generate_scenario
-
-        if action_id == "v2_threat_scenario_review":
-            doc = GeneratedScenario.objects(id=action.get("value", "")).first()
-            if not doc:
-                return
-            breadcrumb = _breadcrumb(doc.module, doc.threat_id, doc.incident_id, doc.cause_id)
-            if response_url:
-                _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "org_threats"))
-            return
-
-        module, threat_id, incident_id, cause_id = action.get("value", "").split("|", 3)
-        breadcrumb = _breadcrumb(module, threat_id, incident_id, cause_id)
-
-        if response_url:
-            _replace_message(response_url, with_nav_bar_v2(build_generating_card(breadcrumb), "org_threats"))
-
-        threat = _find_threat(module, threat_id)
-        incident = _find_incident(module, threat_id, incident_id)
-        cause = next((c for c in (incident or {}).get("causes", []) if c["id"] == cause_id), None) if incident else None
-        threat_label = threat["label"] if threat else threat_id
-        incident_name = incident["name"] if incident else incident_id
-        cause_name = cause["name"] if cause else cause_id
-
-        result = generate_scenario(slack_team_id, threat_label, incident_name, cause_name, ["Identification", "Containment"])
-        if not result or not result.get("injects"):
-            if response_url:
-                _replace_message(
-                    response_url,
-                    with_nav_bar_v2(
-                        build_scenario_failed_card(
-                            breadcrumb,
-                            "Couldn't write a scenario -- make sure a real plan is uploaded and roles are assigned for this workspace, then try again.",
-                        ),
-                        "org_threats",
-                    ),
-                )
-            return
-
-        doc = GeneratedScenario(
-            team_id=slack_team_id, module=module, threat_id=threat_id, incident_id=incident_id, cause_id=cause_id,
-            threat_label=threat_label, incident_name=incident_name, cause_name=cause_name,
-            phases=["Identification", "Containment"],
-            injects=result["injects"], consequence_injects=result.get("consequence_injects", []),
-        )
-        doc.save()
-
-        if response_url:
-            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "org_threats"))
+        _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
         return
 
     if action_id in ("v2_ai_training_yes", "v2_ai_training_no"):
@@ -1411,7 +1499,7 @@ def handle_block_action_v2(payload: dict) -> None:
         if training_mode:
             ai_drill_v2.send_pre_notification(scenario, bot_token)
         if response_url:
-            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_timing_picker_card(scenario, training_mode), "org_threats"))
+            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_timing_picker_card(scenario, training_mode), "trigger"))
         return
 
     if action_id == "v2_ai_trigger_now":
@@ -1425,8 +1513,11 @@ def handle_block_action_v2(payload: dict) -> None:
         run = ai_drill_v2.start_run(
             scenario, "now", current_user_id, bot_token, origin_channel_id=top_channel_id, training_mode=training_flag == "1",
         )
+        if top_channel_id and top_message_ts:
+            run.live_channel_id, run.live_message_ts = top_channel_id, top_message_ts
+            run.save()
         if response_url:
-            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_run_status_card(run, scenario), "org_threats"))
+            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_run_status_card(run, scenario), "trigger"))
         return
 
     if action_id == "v2_ai_trigger_surprise":
@@ -1449,7 +1540,7 @@ def handle_block_action_v2(payload: dict) -> None:
             origin_channel_id=top_channel_id, training_mode=training_flag == "1",
         )
         if response_url:
-            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_run_status_card(run, scenario), "org_threats"))
+            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_run_status_card(run, scenario), "trigger"))
         return
 
     if action_id == "v2_ai_trigger_schedule_open":
@@ -1467,301 +1558,91 @@ def handle_block_action_v2(payload: dict) -> None:
         ai_drill_v2.handle_decision(payload, bot_token)
         return
 
-    if action_id == "v2_scenario_generate":
-        from .scenario_v2_data import _breadcrumb, build_generating_card, build_scenario_failed_card, build_scenario_review_card
-        from .threat_map_v2_data import _find_incident, _find_threat
+    if action_id.startswith("v2_scenario_phase_tab__"):
+        from .scenario_v2_data import build_scenario_review_card
         from .models_v2 import GeneratedScenario
-        from plans.scenario_generator import generate_scenario
 
-        module, threat_id, incident_id, cause_id = action.get("value", "").split(":", 3)
-        breadcrumb = _breadcrumb(module, threat_id, incident_id, cause_id)
-
-        if response_url:
-            _replace_message(response_url, with_nav_bar_v2(build_generating_card(breadcrumb), "threat_map"))
-
-        threat = _find_threat(module, threat_id)
-        incident = _find_incident(module, threat_id, incident_id)
-        cause = next((c for c in (incident or {}).get("causes", []) if c["id"] == cause_id), None) if incident else None
-        threat_label = threat["label"] if threat else threat_id
-        incident_name = incident["name"] if incident else incident_id
-        cause_name = cause["name"] if cause else cause_id
-
-        result = generate_scenario(slack_team_id, threat_label, incident_name, cause_name, ["Identification", "Containment"])
-        if not result or not result.get("injects"):
-            if response_url:
-                _replace_message(
-                    response_url,
-                    with_nav_bar_v2(
-                        build_scenario_failed_card(
-                            breadcrumb,
-                            "Couldn't write a scenario -- make sure a real plan is uploaded and roles are assigned for this workspace, then try again.",
-                        ),
-                        "threat_map",
-                    ),
-                )
+        parts = action.get("value", "").split("|")
+        doc_id = parts[0] if parts else ""
+        phase = parts[1] if len(parts) > 1 else ""
+        page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        doc = GeneratedScenario.objects(id=doc_id).first()
+        if not doc:
             return
-
-        doc = GeneratedScenario(
-            team_id=slack_team_id, module=module, threat_id=threat_id, incident_id=incident_id, cause_id=cause_id,
-            threat_label=threat_label, incident_name=incident_name, cause_name=cause_name,
-            phases=["Identification", "Containment"],
-            injects=result["injects"], consequence_injects=result.get("consequence_injects", []),
-        )
-        doc.save()
-
+        breadcrumb = f"{doc.threat_label}  ›  {doc.incident_name}  ›  {doc.cause_name}"
         if response_url:
-            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "threat_map"))
+            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb, active_phase=phase, consequences_page=page), "org_threats"))
         return
 
-    if action_id in ("v2_scenario_approve", "v2_scenario_regenerate"):
-        from .scenario_v2_data import _breadcrumb, build_generating_card, build_scenario_failed_card, build_scenario_review_card
+    if action_id == "v2_scenario_consequences_page":
+        from .scenario_v2_data import _CONSEQUENCES_TAB, build_scenario_review_card
         from .models_v2 import GeneratedScenario
-        from plans.scenario_generator import generate_scenario
+
+        doc_id, _, page_str = action.get("value", "").partition("|")
+        doc = GeneratedScenario.objects(id=doc_id).first()
+        if not doc:
+            return
+        page = int(page_str) if page_str.isdigit() else 0
+        breadcrumb = f"{doc.threat_label}  ›  {doc.incident_name}  ›  {doc.cause_name}"
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb, active_phase=_CONSEQUENCES_TAB, consequences_page=page), "org_threats"))
+        return
+
+    if action_id == "v2_scenario_approve":
+        import datetime
+
+        from . import ai_drill_v2
+        from .models_v2 import GeneratedScenario
 
         doc = GeneratedScenario.objects(id=action.get("value", "")).first()
         if not doc:
             return
-        breadcrumb = f"{doc.threat_label}  ›  {doc.incident_name}  ›  {doc.cause_name}"
 
-        if action_id == "v2_scenario_approve":
-            import datetime
-
-            doc.status = "approved"
-            doc.approved_by_slack_user_id = current_user_id
-            doc.approved_at = datetime.datetime.utcnow()
-            doc.save()
-            if response_url:
-                _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "org_threats"))
-            return
-
-        # v2_scenario_regenerate -- discard this proposal and write a new one
-        if response_url:
-            _replace_message(response_url, with_nav_bar_v2(build_generating_card(breadcrumb), "org_threats"))
-        result = generate_scenario(doc.team_id, doc.threat_label, doc.incident_name, doc.cause_name, doc.phases)
-        if not result or not result.get("injects"):
-            doc.delete()
-            if response_url:
-                _replace_message(response_url, with_nav_bar_v2(build_scenario_failed_card(breadcrumb, "The regeneration attempt failed -- try again."), "org_threats"))
-            return
-        doc.injects = result["injects"]
-        doc.consequence_injects = result.get("consequence_injects", [])
-        doc.status = "proposed"
-        doc.approved_by_slack_user_id = None
-        doc.approved_at = None
+        doc.status = "approved"
+        doc.approved_by_slack_user_id = current_user_id
+        doc.approved_at = datetime.datetime.utcnow()
         doc.save()
         if response_url:
-            _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb), "org_threats"))
+            # Approve hands straight off to the Trigger tab's own
+            # training-mode question (ai_drill_v2.build_trigger_picker_card)
+            # instead of re-showing that same question embedded in the
+            # review card -- that card already existed, it just wasn't
+            # being used anywhere (sir's call: one training-mode prompt,
+            # same place the fixed-plan flow already asks it, not two).
+            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_trigger_picker_card(doc), "trigger"))
         return
 
-    if action_id == "v2_scenario_done":
-        module, _, scenario = action.get("value", "").partition(":")
-        if not scenario:
-            return  # nothing picked yet -- button isn't primary/active in that case
-        card = build_test_plan_card(module, scenario)
-        _replace_message(response_url, with_nav_bar_v2(card, "test_plan"))
-        return
+    if action_id == "v2_scenario_goto_trigger":
+        # Coming back to an already-approved scenario (e.g. re-opening
+        # the same Incident on Threat Mapping) has nothing to re-approve
+        # -- just hands off to the same Trigger screen Approve itself
+        # goes to, so there's still a way forward (there's no separate
+        # "Trigger" nav tab to click instead any more).
+        from . import ai_drill_v2
+        from .models_v2 import GeneratedScenario
 
-    if action_id == "v2_plan_arm":
-        module, _, scenario = action.get("value", "").partition(":")
-        import datetime
-
-        persistence_v2.save_scenario_selection(
-            slack_team_id, module, scenario_id=scenario, armed=True, armed_at=datetime.datetime.utcnow()
-        )
-        from .trigger_v2_data import build_training_mode_card
-
-        card = build_training_mode_card(module, scenario)
-        _replace_message(response_url, with_nav_bar_v2(card, "trigger"))
-        return
-
-    if action_id == "v2_plan_arm_real":
-        plan_id, phase, scenario = action.get("value", "").split(":", 2)
-        import datetime
-
-        persistence_v2.save_scenario_selection(
-            slack_team_id, plan_id, scenario_id=scenario, phase=phase, armed=True, armed_at=datetime.datetime.utcnow()
-        )
-        from .trigger_v2_data import build_training_mode_card
-
-        card = build_training_mode_card(plan_id, scenario)
-        _replace_message(response_url, with_nav_bar_v2(card, "trigger"))
-        return
-
-    if action_id in ("v2_trigger_training_yes", "v2_trigger_training_no"):
-        from .trigger_v2_data import build_trigger_card, send_pre_notification
-
-        module, _, scenario = action.get("value", "").partition(":")
-        if action_id == "v2_trigger_training_yes" and slack_team_id and bot_token:
-            send_pre_notification(slack_team_id, module, scenario, bot_token)
-        card = build_trigger_card(module, scenario)
-        _replace_message(response_url, with_nav_bar_v2(card, "trigger"))
-        return
-
-    if action_id.startswith("v2_trigger_pick__"):
-        module, scenario, trigger_key = action.get("value", "").split(":", 2)
-        slack_team_id = payload.get("team", {}).get("id", "")
-        bot_token = get_bot_token(slack_team_id)
-
-        # "Schedule" previously fired the drill immediately, identically
-        # to "Trigger now", despite claiming "pick a window" -- it now
-        # actually asks for a date/time via a modal instead, and doesn't
-        # create or fire anything until that's submitted (see
-        # trigger_schedule_modal_v2.handle_submission).
-        if trigger_key == "sched":
-            from . import trigger_schedule_modal_v2
-
-            trigger_id = payload.get("trigger_id", "")
-            channel_id = payload.get("channel", {}).get("id", "")
-            message_ts = payload.get("message", {}).get("ts", "")
-            if trigger_id and channel_id and bot_token:
-                trigger_schedule_modal_v2.open_modal(trigger_id, module, scenario, channel_id, message_ts, bot_token)
+        doc = GeneratedScenario.objects(id=action.get("value", "")).first()
+        if not doc:
             return
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_trigger_picker_card(doc), "trigger"), bot_token, top_channel_id, top_message_ts)
+        return
 
-        from exercises.models import Exercise
-        from workspaces.models import Workspace
+    if action_id == "v2_ai_live_report":
+        from . import ai_drill_v2
+        from .models_v2 import AIExerciseRun
 
-        # If "module" is really a real plan_id (reached via the
-        # Launch-test path), carry through which Phase was armed -- the
-        # live inject chain starts there and stays within that phase,
-        # instead of always running the whole plan from the start.
-        armed_selection = persistence_v2.load_scenario_selection(slack_team_id, module)
-        inject_phase = armed_selection.get("phase") or ""
-
-        exercise = Exercise(
-            scenario_name=scenario,
-            module=module,
-            trigger_type=trigger_key,
-            inject_phase=inject_phase,
-            started_by_slack_user_id=current_user_id,
-            slack_team_id=slack_team_id,
-        )
-
-        workspace = Workspace.objects(team_id=slack_team_id).first()
-        # The real alarm goes into the real war-room/privacy-bridge
-        # channel, not the admin's own command-center channel.
-        target_channel_id = ""
-        if workspace:
-            target_channel_id = (
-                workspace.privacy_bridge_channel_id if module == "Privacy" else workspace.ir_war_room_channel_id
-            ) or ""
-        exercise.slack_channel_id = target_channel_id
-
-        if trigger_key == "surprise":
-            # Same bug "Schedule" had -- this used to fire immediately
-            # despite claiming "within the next 7 days". Reuses the exact
-            # same scheduled_at + background-fire mechanism "Schedule"
-            # uses, just with a random time instead of an admin-picked
-            # one -- and the exact time is never shown back, since
-            # revealing it would defeat the point of a surprise drill.
-            import datetime
-            import random
-
-            exercise.status = "scheduled"
-            exercise.scheduled_at = datetime.datetime.utcnow() + datetime.timedelta(
-                seconds=random.randint(60, 7 * 24 * 60 * 60)
-            )
-            exercise.save()
-
-            card = build_trigger_card(module, scenario, "surprise")
-            card["blocks"].insert(
-                1,
-                {
-                    "type": "context",
-                    "elements": [
-                        {"type": "mrkdwn", "text": ":game_die: *Surprise window armed* — it'll fire at a random time within the next 7 days. No further action needed."}
-                    ],
-                },
-            )
-            _replace_message(response_url, with_nav_bar_v2(card, "trigger"))
+        run = AIExerciseRun.objects(id=action.get("value", "")).first()
+        if not run:
             return
-
-        # "now" -- fire immediately.
-        from exercises.drill import fire_exercise
-
-        exercise.save()
-        fire_exercise(exercise, bot_token)
-
-        card = build_live_card(module, scenario, trigger_key, exercise=exercise)
-        _replace_message(response_url, with_nav_bar_v2(card, "trigger"))
-        return
-
-    if action_id == "v2_trigger_cancel_scheduled":
-        module, _, scenario = action.get("value", "").partition(":")
-        slack_team_id = payload.get("team", {}).get("id", "")
-
-        from exercises.models import Exercise
-
-        Exercise.objects(
-            status="scheduled", slack_team_id=slack_team_id, module=module, scenario_name=scenario
-        ).delete()
-
-        card = build_trigger_card(module, scenario)
-        _replace_message(response_url, with_nav_bar_v2(card, "trigger"))
-        return
-
-    # Real inline select-then-Submit for a drill decision: clicking an
-    # A/B/C/D button just marks it selected (highlighted), clicking
-    # Submit reads whichever one is currently highlighted and finalises
-    # it -- same two-step interaction as the mockup, no modal needed.
-    if action_id.startswith("v2_decision_select__"):
-        option = action_id.removeprefix("v2_decision_select__")
-        response_id = action.get("value", "")
-        dm_channel_id = payload.get("channel", {}).get("id", "")
-        message_ts = payload.get("message", {}).get("ts", "")
-        if response_id and option:
-            from .inject_drill_v2 import handle_decision_select
-
-            handle_decision_select(response_id, option, dm_channel_id, message_ts, bot_token)
-        return
-
-    if action_id == "v2_decision_submit":
-        response_id = action.get("value", "")
-        if response_id:
-            from .inject_drill_v2 import handle_decision_submit
-
-            handle_decision_submit(response_id, message_blocks, bot_token)
-        return
-
-    if action_id == "v2_drill_task_done":
-        # Step 4 -- the stopwatch actually stopping. Real timestamp, real
-        # elapsed time, saved for the report.
-        import datetime
-
-        from exercises.models import ExerciseTask
-
-        task_id = action.get("value", "")
-        task = ExerciseTask.objects(id=task_id).first()
-        if task and task.status == "sent":
-            task.status = "done"
-            task.responded_at = datetime.datetime.utcnow()
-            task.save()
-            elapsed = task.responded_at - task.sent_at
-            minutes = int(elapsed.total_seconds() // 60)
-            seconds = int(elapsed.total_seconds() % 60)
-            _replace_message(
-                response_url,
-                {
-                    "blocks": [
-                        {
-                            "type": "section",
-                            "text": {
-                                "type": "mrkdwn",
-                                "text": f":white_check_mark: *Done* — {task.role} on {task.team_name}\nRecorded in {minutes}m {seconds}s.",
-                            },
-                        }
-                    ]
-                },
+        trigger_id = payload.get("trigger_id", "")
+        if trigger_id and bot_token:
+            requests.post(
+                "https://slack.com/api/views.open",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                json={"trigger_id": trigger_id, "view": ai_drill_v2.build_report_modal_view(run)},
+                timeout=10,
             )
-
-            # Step 6 -- once every real task for this drill has either
-            # been done or escalated (nothing left "sent"), the exercise
-            # is over; the report can now show a completed drill instead
-            # of one that looks stuck mid-run forever.
-            exercise = task.exercise
-            if exercise and not ExerciseTask.objects(exercise=exercise, status="sent"):
-                exercise.status = "completed"
-                exercise.ended_at = datetime.datetime.utcnow()
-                exercise.save()
         return
 
     if action_id == "v2_live_inject":
@@ -1784,76 +1665,6 @@ def handle_block_action_v2(payload: dict) -> None:
             inject_modal_v2.send_inject(index, channel_id, view_id, bot_token)
         return
 
-    if action_id == "v2_live_report":
-        trigger_id = payload.get("trigger_id", "")
-        slack_team_id = payload.get("team", {}).get("id", "")
-        bot_token = get_bot_token(slack_team_id)
-        if trigger_id and bot_token:
-            report_modal_v2.open_modal(trigger_id, bot_token, slack_team_id)
-        return
-
-    if action_id == "v2_nav_jump__test_plan":
-        # Clicking the TestMyPlan tab directly (not via the Threat Profile
-        # Trigger button) had no handler at all -- fell through to the
-        # generic no-op below and did nothing. Reconstruct the real plan
-        # card from whatever was last picked on Threat Profile instead.
-        from .plan_catalog_v2 import find_plan_id_for_taxonomy
-        from .threat_map_v2_data import _find_threat
-        from .threats_v2_data import THREATS
-
-        nav = persistence_v2.load_threat_profile_nav(slack_team_id) if slack_team_id else {}
-        active_module = nav.get("active_module")
-        raw_key = nav.get("active_threat")
-        active_incident = nav.get("active_incident")
-        active_cause = nav.get("active_cause")
-        active_phase = nav.get("active_phase")
-        active_scenario = nav.get("active_scenario")
-        active_crit = nav.get("active_crit")
-
-        plan_id = None
-        if active_module and raw_key and active_incident and active_cause:
-            plan_id = find_plan_id_for_taxonomy(active_module, raw_key, active_incident, active_cause)
-
-        if plan_id and active_phase and active_scenario:
-            # Same breadcrumb trail the Trigger button passes -- reconstructed
-            # here from the real taxonomy so it shows the same way whether you
-            # got here by clicking Trigger or jumping straight to this tab.
-            threat_label = next((t["label"] for t in THREATS if t["key"] == raw_key), raw_key)
-            taxonomy_threat = _find_threat(active_module, raw_key)
-            incident_name, cause_name = active_incident, active_cause
-            if taxonomy_threat:
-                incident = next((inc for inc in taxonomy_threat["incidents"] if inc["id"] == active_incident), None)
-                if incident:
-                    incident_name = incident["name"]
-                    cause = next((c for c in incident["causes"] if c["id"] == active_cause), None)
-                    if cause:
-                        cause_name = cause["name"]
-            breadcrumb = {
-                "module": active_module, "crit": active_crit, "threat": threat_label,
-                "incident": incident_name, "cause": cause_name, "phase": active_phase, "scenario": active_scenario,
-            }
-            card = build_real_test_plan_card(
-                plan_id, active_phase, active_scenario, breadcrumb=breadcrumb, slack_team_id=slack_team_id, bot_token=bot_token,
-            )
-        elif plan_id:
-            # A real Threat -> Incident -> Cause is picked, just not
-            # Phase/Scenario yet -- show the Configure Test picker
-            # instead of a dead-end message.
-            from .test_plan_v2_data import build_configure_test_card
-
-            card = build_configure_test_card(
-                active_module, raw_key, active_incident, active_cause,
-                active_phase or "", active_scenario or "", _breadcrumb_from_nav(nav), team_id=slack_team_id,
-            )
-        else:
-            card = {
-                "blocks": [
-                    {"type": "header", "text": {"type": "plain_text", "text": ":clipboard: Step 6 · Configure test", "emoji": True}},
-                    {"type": "section", "text": {"type": "mrkdwn", "text": "_Pick a Threat → Incident on Threat Profile first, then TestMyPlan to see it here._"}},
-                ]
-            }
-        _replace_message(response_url, with_nav_bar_v2(card, "test_plan"))
-        return
 
     if action_id.startswith("v2_nav_jump__"):
         # Nav tabs for steps not built yet -- nothing to show, leave the

@@ -1,8 +1,9 @@
 import json
 import logging
 import threading
+from pathlib import Path
 
-from django.http import JsonResponse
+from django.http import FileResponse, HttpResponseNotFound, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -12,6 +13,24 @@ from .interactivity import handle_block_action, handle_view_submission
 from .interactivity_v2 import handle_block_action_v2
 
 logger = logging.getLogger(__name__)
+
+STATIC_ASSETS_DIR = Path(__file__).parent / "static_assets"
+
+
+def serve_static_asset(request, filename: str):
+    """
+    Real images referenced from a Slack card's "image" block need a
+    real public HTTPS URL -- Slack's servers fetch it themselves, a
+    local file path won't work. No staticfiles/CDN setup exists in this
+    project yet, so this is the simplest way to give one real file a
+    real URL (reached through the existing ngrok tunnel, same as every
+    other endpoint here), without changing/removing any other part of
+    the build. Nothing beyond this folder is exposed.
+    """
+    path = (STATIC_ASSETS_DIR / filename).resolve()
+    if STATIC_ASSETS_DIR.resolve() not in path.parents or not path.is_file():
+        return HttpResponseNotFound()
+    return FileResponse(open(path, "rb"))
 
 
 @csrf_exempt

@@ -148,7 +148,7 @@ def handle_submission(payload: dict, bot_token: str) -> None:
         from .bia_upload_v2_data import build_bia_upload_card
         from .nav_v2 import with_nav_bar_v2
 
-        card = with_nav_bar_v2(build_bia_upload_card(team_id), "bia_upload")
+        card = with_nav_bar_v2(build_bia_upload_card(team_id, user_id, bot_token), "bia_upload")
         try:
             requests.post(
                 f"{SLACK_API_BASE}/chat.update",

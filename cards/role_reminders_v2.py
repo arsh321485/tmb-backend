@@ -102,10 +102,18 @@ def check_role_reminders() -> int:
     sent_count = 0
 
     for tm in TeamMember.objects():
+        # Confirmed live: dm_status/dm_sent_at/reminders_sent entries for
+        # someone who's since been reassigned away from this role (no
+        # longer in primary_slack_user_ids) never get cleaned up -- this
+        # used to keep nagging the admin about them forever, for a role
+        # they don't even hold anymore. Only people CURRENTLY assigned
+        # as primary are real candidates for a reminder/escalation here.
         pending = [
             uid
-            for uid, status in (tm.dm_status or {}).items()
-            if status == "sent" and uid not in (tm.acknowledged_by or {}) and uid not in (tm.declined_by or {})
+            for uid in tm.primary_slack_user_ids
+            if (tm.dm_status or {}).get(uid) == "sent"
+            and uid not in (tm.acknowledged_by or {})
+            and uid not in (tm.declined_by or {})
         ]
         if not pending:
             continue

@@ -4,41 +4,39 @@
   "blocks": [
     {
       "type": "header",
-      "text": { "type": "plain_text", "text": ":wave: Welcome, {{USER_NAME}}!", "emoji": true }
-    },
-    {
-      "type": "context",
-      "elements": [
-        { "type": "mrkdwn", "text": ":large_green_circle: *Connected*  ·  Getting started" }
-      ]
+      "text": { "type": "plain_text", "text": ":wave: Welcome to TestMyPlan, {{USER_NAME}}!", "emoji": true }
     },
     {
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "This channel is where *{{TEAM_NAME}}* plans, runs, and reviews every readiness test."
+        "text": "TestMyPlan helps *{{TEAM_NAME}}* build and run realistic incident response drills — right inside Slack. Configure your org, upload your BCP, set up teams, and trigger your first drill."
       }
+    },
+    {
+      "type": "context",
+      "elements": [
+        { "type": "mrkdwn", "text": ":large_green_circle: *Connected* · Workspace ready" }
+      ]
     },
     { "type": "divider" },
     {
       "type": "section",
-      "text": { "type": "mrkdwn", "text": "*How it works*" }
+      "text": { "type": "mrkdwn", "text": ":sparkles: *HOW IT WORKS*" }
     },
     {
       "type": "section",
-      "text": { "type": "mrkdwn", "text": ":one: Instant incident preparedness" }
+      "fields": [
+        { "type": "mrkdwn", "text": ":large_purple_circle: *1 · Select your modules*\nChoose which IR domains apply — Cybersecurity, Privacy, and more." },
+        { "type": "mrkdwn", "text": ":large_blue_circle: *2 · Upload & analyse your BCP*\nWe extract RTOs, critical services and build your threat landscape." }
+      ]
     },
     {
       "type": "section",
-      "text": { "type": "mrkdwn", "text": ":two: Add another administrator" }
-    },
-    {
-      "type": "section",
-      "text": { "type": "mrkdwn", "text": ":three: Configure your team" }
-    },
-    {
-      "type": "section",
-      "text": { "type": "mrkdwn", "text": ":four: Launch the test" }
+      "fields": [
+        { "type": "mrkdwn", "text": ":large_orange_circle: *3 · Configure response teams*\nAssign primary and backup owners for every IR role across all teams." },
+        { "type": "mrkdwn", "text": ":large_green_circle: *4 · Trigger your drill*\nSend injects now, schedule a window, or fire a surprise exercise." }
+      ]
     },
     { "type": "divider" },
     {
@@ -46,7 +44,7 @@
       "elements": [
         {
           "type": "button",
-          "text": { "type": "plain_text", "text": ":arrow_right: Get started", "emoji": true },
+          "text": { "type": "plain_text", "text": ":rocket: Get started", "emoji": true },
           "action_id": "v2_welcome_next",
           "value": "next",
           "style": "primary"

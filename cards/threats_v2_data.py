@@ -53,7 +53,7 @@ EXTRA_THREATS = {
 }
 
 CRIT_OPTIONS = ["Critical", "High", "Med", "Dropped"]
-CRIT_EMOJI = {"Critical": "🔴", "High": "🟠", "Med": "🟡", "Dropped": "⚪"}
+CRIT_EMOJI = {"Critical": "🟫", "High": "🟥", "Med": "🟨", "Dropped": "⬜"}
 ADD_CRIT_CHOICES = ["Critical", "High", "Med"]  # a newly added threat can't start "Dropped"
 
 
@@ -242,10 +242,16 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
     """
     threats = THREATS
     research_context = ""
+    using_dynamic_profile = False
     if team_id:
+        from .models_v2 import OrgThreatProfile
         from plans.threat_ranking import rank_threats, sector_research_context
 
-        threats = rank_threats(team_id, THREATS)
+        approved_profile = OrgThreatProfile.objects(team_id=team_id, status="approved").first()
+        base_threats = approved_profile.threats if approved_profile else THREATS
+        using_dynamic_profile = approved_profile is not None
+
+        threats = rank_threats(team_id, base_threats)
         research_context = sector_research_context(team_id)
 
     fixed_state = state.get("fixed", {})
@@ -263,11 +269,11 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
         counts[c["crit"]] += 1
 
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":dart: Step 3 · Organizational threats", "emoji": True}},
+        {"type": "header", "text": {"type": "plain_text", "text": ":dart: STEP 3 · ORGANIZATIONAL THREATS", "emoji": True}},
         {
             "type": "context",
             "elements": [
-                {"type": "mrkdwn", "text": f":red_circle: *{total_kept} threats*"}
+                {"type": "mrkdwn", "text": f"🟥 *{total_kept} threats*"}
             ],
         },
         {
@@ -276,10 +282,10 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
                 {
                     "type": "mrkdwn",
                     "text": (
-                        f":red_circle: *{counts['Critical']}* Critical   |   "
-                        f":large_orange_circle: *{counts['High']}* High   |   "
-                        f":large_yellow_circle: *{counts['Med']}* Med   |   "
-                        f"⚪ *{counts['Dropped']}* Dropped"
+                        f"🟫 *{counts['Critical']}* Critical   |   "
+                        f"🟥 *{counts['High']}* High   |   "
+                        f"🟨 *{counts['Med']}* Med   |   "
+                        f"⬜ *{counts['Dropped']}* Dropped"
                     ),
                 }
             ],
@@ -289,6 +295,7 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
             if research_context
             else []
         ),
+        {"type": "divider"},
         {
             "type": "section",
             "text": {
@@ -304,12 +311,13 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
     if profile and (profile.get("industry") or profile.get("regions") or profile.get("regulations")):
         tags = []
         if profile.get("industry"):
-            tags.append(f"*SECTOR*  {profile['industry']}")
+            tags.append(f":office: *Sector*  {profile['industry']}")
         if profile.get("regions"):
-            tags.append(f"*REGIONS*  {' · '.join(profile['regions'])}")
+            tags.append(f":globe_with_meridians: *Regions*  {' · '.join(profile['regions'])}")
         if profile.get("regulations"):
-            tags.append(f"*REGULATION*  {' · '.join(profile['regulations'])}")
-        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "   ".join(tags)}]})
+            tags.append(f":scales: *Regulation*  {' · '.join(profile['regulations'])}")
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "     ".join(tags)}]})
+        blocks.append({"type": "divider"})
 
     # Strict step-by-step disclosure (sir's call): nothing below a level
     # shows until that level has been explicitly clicked -- no
@@ -343,12 +351,31 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
     # its own effective criticality -- drives both the criticality tab row
     # and the threat-name tab row below it.
     mod_fixed = [t for t in threats if t["module"] == active_module]
-    mod_custom_list = [c for c in custom if c["module"] == active_module]
+    # The old local "+ Add a threat we missed" mechanism (per-message
+    # state, never persisted) is only for the legacy fixed-4 screen --
+    # once an org has an approved dynamic profile, adding/removing a
+    # threat happens on the Threat Approval tab instead, so it stays
+    # the one source of truth instead of having two separate lists.
+    mod_custom_list = [] if using_dynamic_profile else [c for c in custom if c["module"] == active_module]
     mod_items = [
-        {"key": t["key"], "label": t["label"], "crit": fixed_state.get(t["key"], t["default_crit"]), "custom": False, "why": t["why"]}
+        {
+            "key": t["key"],
+            "label": t["label"],
+            "crit": fixed_state.get(t["key"], t["default_crit"]),
+            "custom": False,
+            "why": t["why"],
+            "business_impact": t.get("business_impact", ""),
+        }
         for t in mod_fixed
     ] + [
-        {"key": f"custom:{c['label']}", "label": c["label"], "crit": c["crit"], "custom": True, "why": "Added by you — no scenarios generated yet."}
+        {
+            "key": f"custom:{c['label']}",
+            "label": c["label"],
+            "crit": c["crit"],
+            "custom": True,
+            "why": "Added by you — no scenarios generated yet.",
+            "business_impact": c.get("business_impact", ""),
+        }
         for c in mod_custom_list
     ]
 
@@ -400,7 +427,18 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
         if active_item["crit"] == "Dropped":
             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "_Dropped — won't be part of this test._"}})
         else:
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"_{active_item['why']}_"}})
+            detail_text = f"*Why critical:* {active_item['why']}"
+            if active_item.get("business_impact"):
+                detail_text += f"\n*Impact if it happens:* {active_item['business_impact']}"
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": detail_text}})
+
+            if team_id and not active_item["custom"]:
+                from plans.threat_ranking import mapped_services_for_threat
+
+                mapped = mapped_services_for_threat(team_id, {"label": active_item["label"], "why": active_item["why"], "module": active_module})
+                if mapped:
+                    lines = "\n".join(f"  • {s.get('name', '?')} (RTO {s.get('rto', 'unknown')})" for s in mapped)
+                    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Mapped services from your plan:*\n{lines}"}})
 
             # Incident tabs, reusing the same real taxonomy the later
             # Threat map step already has (same threat IDs) -- shown
@@ -408,7 +446,15 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
             # the selected incident (the deepest level, so no tab needed).
             raw_key = active_item["key"]
             incidents = []
-            if not active_item["custom"]:
+            if using_dynamic_profile and not active_item["custom"]:
+                # AI-generated (or admin-added on the Threat Approval tab)
+                # threats aren't in the old fixed THREAT_MAP taxonomy --
+                # generate (and cache) this one's incident/cause tree
+                # instead of looking it up there.
+                from .threat_profile_review_v2 import ensure_threat_map
+
+                incidents = ensure_threat_map(team_id, raw_key)
+            elif not active_item["custom"]:
                 from .threat_map_v2_data import _find_threat
 
                 taxonomy_threat = _find_threat(active_module, raw_key)
@@ -444,47 +490,54 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
                     if not any(c["id"] == active_cause for c in causes):
                         active_cause = causes[0]["id"] if causes else None
 
-                    selected_cause = next((c for c in causes if c["id"] == active_cause), None)
-                    if selected_cause:
-                        from .plan_catalog_v2 import find_plan_id_for_taxonomy
-
-                        # Review/Generate AI scenario buttons moved to
-                        # Step 6 · Configure Test (sir's call) -- that
-                        # screen now owns Cause too, so it's the one with
-                        # the real cause-specific plan_id to check against.
-                        blocks.append({"type": "divider"})
-                        blocks.append(
-                            {
-                                "type": "actions",
-                                "elements": [
-                                    {
-                                        "type": "button",
-                                        "text": {"type": "plain_text", "text": "TestMyPlan", "emoji": True},
-                                        "action_id": "v2_threat_configure_test",
-                                        "value": json.dumps(
-                                            {
+                    # Causes + "Build scenario" shown straight under the
+                    # Incident (sir's call) -- no separate TestMyPlan tab
+                    # to click through to any more; testing an incident
+                    # happens right here on Threat Mapping. Every Cause is
+                    # listed for visibility only (nothing to click on
+                    # them individually), and one button runs all of them
+                    # together as a single combined drill
+                    # (cards/incident_test_v2.py).
+                    blocks.append({"type": "divider"})
+                    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`CAUSES`"}]})
+                    blocks.append(
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": "\n".join(f"• {c['name']}" for c in causes)},
+                        }
+                    )
+                    blocks.append(
+                        {
+                            "type": "actions",
+                            "elements": [
+                                {
+                                    "type": "button",
+                                    "text": {"type": "plain_text", "text": ":sparkles: Build scenario", "emoji": True},
+                                    "action_id": "v2_cfgtest_run_incident",
+                                    "value": json.dumps(
+                                        {
+                                            "module": active_module,
+                                            "threat_key": raw_key,
+                                            "incident_id": selected_incident["id"],
+                                            "breadcrumb": {
                                                 "module": active_module,
-                                                "threat_key": raw_key,
-                                                "incident_id": selected_incident["id"],
-                                                "breadcrumb": {
-                                                    "module": active_module,
-                                                    "crit": active_crit,
-                                                    "threat": active_item["label"],
-                                                    "incident": selected_incident["name"],
-                                                },
-                                            }
-                                        ),
-                                        "style": "danger",
-                                    }
-                                ],
-                            }
-                        )
+                                                "crit": active_crit,
+                                                "threat": active_item["label"],
+                                                "incident": selected_incident["name"],
+                                            },
+                                        }
+                                    ),
+                                    "style": "danger",
+                                }
+                            ],
+                        }
+                    )
             elif not active_item["custom"]:
                 blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No incidents mapped for this threat yet._"}]})
 
     blocks.append({"type": "divider"})
 
-    if form is not None:
+    if form is not None and not using_dynamic_profile:
         blocks.extend(_add_form_blocks(form, custom))
 
     return {"blocks": blocks}

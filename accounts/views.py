@@ -50,6 +50,8 @@ def save_pending_org_profile(request):
         token=token,
         org_name=(data.get("org_name") or "").strip(),
         industry=(data.get("industry") or "").strip(),
+        sub_industry=(data.get("sub_industry") or "").strip(),
+        company_size=(data.get("company_size") or "").strip(),
         website_url=website_url,
         regions=list(data.get("regions") or []),
         regulations=list(data.get("regulations") or []),
@@ -235,6 +237,8 @@ def _attach_pending_org_profile(request, team_id: str) -> None:
     profile = OrgProfile.objects(team_id=team_id).first() or OrgProfile(team_id=team_id)
     profile.org_name = pending.org_name
     profile.industry = pending.industry
+    profile.sub_industry = pending.sub_industry
+    profile.company_size = pending.company_size
     profile.website_url = pending.website_url
     profile.regions = list(pending.regions)
     profile.regulations = list(pending.regulations)

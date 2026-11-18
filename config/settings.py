@@ -134,6 +134,18 @@ MONGO_DB_NAME = config("MONGO_DB_NAME", default="tmb_backend")
 # because it has a genuinely free tier, unlike the Anthropic/OpenAI APIs.
 GEMINI_API_KEY = config("GEMINI_API_KEY", default="")
 
+# OpenAI API -- second real backup for plans/scenario_generator.py
+# (Agent 2), used after NVIDIA, instead of GEMINI_API_KEY there.
+# Confirmed live: Gemini's free tier hit a real HTTP 429 (rate limit)
+# during heavy same-day testing, which meant BOTH providers failing at
+# once for every scenario-generation attempt -- a different backup
+# provider is a real second option, not just another retry against the
+# same exhausted quota. Left blank, that one call path still works as
+# before (NVIDIA only, no second fallback) -- nothing else in this app
+# uses this key.
+OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
+OPENAI_MODEL = config("OPENAI_MODEL", default="gpt-4o-mini")
+
 # NVIDIA NIM API -- Phase 1 (Read) backend AI: generating structured
 # data (service catalogues, BIA interview follow-ups, resilience map
 # text) from real plan content. Separate from GEMINI_API_KEY above,

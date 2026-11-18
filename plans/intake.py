@@ -90,6 +90,20 @@ def ingest_one_file(
         _post_message(channel_id, f":warning: Couldn't read `{filename}` from Slack.", bot_token)
         return None
 
+    if post_confirmation:
+        # Real extraction below (text parsing + 2 AI calls) can take a
+        # few minutes -- confirmed live, one real upload's confirmation
+        # took ~5 minutes with nothing posted the whole time, so it
+        # looked like the file had vanished. This fires immediately,
+        # before any of that slow work starts.
+        _post_message(
+            channel_id,
+            f":inbox_tray: Got *{filename}* -- reading it now. This can take a few minutes; "
+            "I'll post the resilience map here and in the *Command Center* as soon as it's ready "
+            "-- review and approve it on the Command Center screen.",
+            bot_token,
+        )
+
     try:
         resp = requests.get(
             download_url,

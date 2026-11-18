@@ -1,13 +1,16 @@
 """
-Shared data + card-building for the new-design preview's "Threat map"
-step (Step 4). Navigation state (which module/threat/incident is
-expanded) is threaded straight through each button's value, same
-pattern as the real app's threat map (cards/render.py) -- no block
-parsing needed here since this is pure drill-down, not an accumulating
-form.
-"""
+The old fixed demo taxonomy (ransomware/phishing/etc.) this app shipped
+with before the real AI threat pipeline existed. The "Threat Mapping"
+tab a real admin sees today is threats_v2_data.py's real org-threats
+screen (nav key "org_threats") -- this file's own card (build_threat_map_card,
+reached via the now-orphaned "threat_map" nav key) was removed entirely
+since nothing in the live nav bar points to it any more.
 
-MODULES = ["Cybersecurity", "Privacy"]
+TAXONOMY/_find_threat are kept ONLY as a fallback lookup used elsewhere
+(resolve_names and friends) for a handful of hand-authored threats that
+predate Agent 1 -- a real AI-generated threat never matches here and
+falls through to the real ensure_threat_map cache instead.
+"""
 
 TAXONOMY = {
     "Cybersecurity": [
@@ -76,135 +79,7 @@ TAXONOMY = {
     ],
 }
 
-# Cross-module "most critical now" shortcuts (module, threat_id).
-CRITICAL_SHORTCUTS = [("Cybersecurity", "ext"), ("Privacy", "breach")]
-
-CRIT_EMOJI = {"Critical": "🔴", "High": "🟠", "Med": "🟡"}
-
 
 def _find_threat(module: str, threat_id: str) -> dict | None:
     return next((t for t in TAXONOMY.get(module, []) if t["id"] == threat_id), None)
 
-
-def _find_incident(module: str, threat_id: str, incident_id: str) -> dict | None:
-    threat = _find_threat(module, threat_id)
-    if not threat:
-        return None
-    return next((i for i in threat["incidents"] if i["id"] == incident_id), None)
-
-
-def build_threat_map_card(module: str = "Cybersecurity", expanded_threat: str = "", expanded_incident: str = "") -> dict:
-    blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":world_map: Step 4 · Threat map", "emoji": True}},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": ":red_circle: *Ranked by criticality*"}]},
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "The threats you confirmed at setup, the incidents that exploit them, and each incident's causes. Pick a cause to see its test scenarios.",
-            },
-        },
-        {"type": "section", "text": {"type": "mrkdwn", "text": ":rotating_light: *Most critical now*"}},
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": f"{_find_threat(mod, tid)['label']} · {mod}", "emoji": True},
-                    "action_id": f"v2_map_jump__{i}",
-                    "value": f"{mod}:{tid}",
-                }
-                for i, (mod, tid) in enumerate(CRITICAL_SHORTCUTS)
-            ],
-        },
-        {"type": "divider"},
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": m, "emoji": True},
-                    "action_id": f"v2_map_module__{m}",
-                    "value": m,
-                    **({"style": "danger"} if m == module else {}),
-                }
-                for m in MODULES
-            ],
-        },
-        {"type": "divider"},
-    ]
-
-    for threat in TAXONOMY.get(module, []):
-        is_expanded = threat["id"] == expanded_threat
-        emoji = CRIT_EMOJI.get(threat["crit"], "")
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*{threat['label']}*  ·  {len(threat['incidents'])} incident(s)  ·  {emoji} {threat['crit']}",
-                },
-            }
-        )
-        blocks.append(
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Hide incidents" if is_expanded else "Open incidents", "emoji": True},
-                        "action_id": f"v2_map_expand_threat__{threat['id']}",
-                        "value": f"{module}:{'' if is_expanded else threat['id']}",
-                    }
-                ],
-            }
-        )
-
-        if is_expanded:
-            for incident in threat["incidents"]:
-                inc_expanded = incident["id"] == expanded_incident
-                blocks.append(
-                    {
-                        "type": "section",
-                        "text": {"type": "mrkdwn", "text": f"› *{incident['name']}*  ·  {len(incident['causes'])} cause(s)"},
-                    }
-                )
-                blocks.append(
-                    {
-                        "type": "actions",
-                        "elements": [
-                            {
-                                "type": "button",
-                                "text": {"type": "plain_text", "text": "Hide causes" if inc_expanded else "View causes", "emoji": True},
-                                "action_id": f"v2_map_expand_incident__{incident['id']}",
-                                "value": f"{module}:{threat['id']}:{'' if inc_expanded else incident['id']}",
-                            }
-                        ],
-                    }
-                )
-                if inc_expanded:
-                    for cause in incident["causes"]:
-                        blocks.append(
-                            {
-                                "type": "section",
-                                "text": {"type": "mrkdwn", "text": f"*{cause['name']}*"},
-                            }
-                        )
-                        blocks.append(
-                            {
-                                "type": "actions",
-                                "elements": [
-                                    {
-                                        "type": "button",
-                                        "text": {"type": "plain_text", "text": f"Scenario — {sc[:30]} →", "emoji": True},
-                                        "action_id": f"v2_map_pick_scenario__{cause['id']}__{si}",
-                                        "value": f"{module}:{threat['id']}:{incident['id']}:{cause['id']}:{sc}",
-                                        "style": "danger",
-                                    }
-                                    for si, sc in enumerate(cause["scenarios"])
-                                ],
-                            }
-                        )
-        blocks.append({"type": "divider"})
-
-    return {"blocks": blocks}

@@ -103,9 +103,9 @@ def build_threats_center_card(state: dict, team_id: str = "") -> dict:
                 {
                     "type": "mrkdwn",
                     "text": (
-                        f":red_circle: *{counts['Critical']}* Critical   |   "
-                        f":large_orange_circle: *{counts['High']}* High   |   "
-                        f":large_yellow_circle: *{counts['Med']}* Med"
+                        f"🟫 *{counts['Critical']}* Critical   |   "
+                        f"🟥 *{counts['High']}* High   |   "
+                        f"🟨 *{counts['Med']}* Med"
                     ),
                 }
             ],
