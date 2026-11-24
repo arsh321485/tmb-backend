@@ -26,8 +26,11 @@ urlpatterns = [
     path("api/commands/", include("commands.urls")),
     path("api/events/", include("home_tab.urls")),
     path("api/interactivity/", include("cards.urls")),
+    path("api/teams-portal/", include("teams_portal.urls")),
     # Real public URLs for images referenced from Slack cards (e.g. the
-    # Welcome banner) -- Slack fetches these itself, so they need to be
-    # reachable over plain HTTPS, not a local file path.
-    path("assets/<str:filename>", serve_static_asset, name="static_asset"),
+    # Welcome banner, and the per-role card images rendered on the fly
+    # under static_assets/generated/) -- Slack fetches these itself, so
+    # they need to be reachable over plain HTTPS, not a local file path.
+    # <path:> (not <str:>) so a "generated/<file>.png" subpath matches too.
+    path("assets/<path:filename>", serve_static_asset, name="static_asset"),
 ]

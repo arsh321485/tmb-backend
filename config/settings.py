@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "plans",
     "workspaces",
     "cards",
+    "teams_portal",
 ]
 
 MIDDLEWARE = [
@@ -70,6 +71,15 @@ CORS_ALLOWED_ORIGINS = config(
     cast=Csv(),
 )
 CORS_ALLOW_CREDENTIALS = True
+
+# teams_portal's OTP session cookie has to survive a cross-origin fetch
+# (website origin != this backend's origin) -- the browser only sends a
+# cookie cross-site at all when it's SameSite=None, and SameSite=None is
+# only honored when the cookie is also Secure. Backend is always served
+# over https (ngrok in dev, real TLS in prod) so this is safe even while
+# the frontend itself is plain http in local dev.
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = True
 
 # Where to send the browser after a successful Slack/Teams login
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:5173")

@@ -5,29 +5,13 @@ see cards/blocks_v2/ and cards/*_v2.py). Creates #testmyplan-command-center
 and posts the Welcome + Organizational Threats cards into it.
 """
 
-import json
 import logging
-from pathlib import Path
 
 from .slack_client import SlackApiError, _call, post_card_to_channel
 
 logger = logging.getLogger(__name__)
 
 PREVIEW_CHANNEL_NAME = "testmyplan-command-center"
-BLOCKS_V2_DIR = Path(__file__).parent / "blocks_v2"
-
-
-def _load_v2_card(filename: str, **replacements) -> dict:
-    """
-    replacements fills in {{PLACEHOLDER}} tokens in the raw JSON before
-    parsing -- used so the Welcome card shows the real workspace/company
-    name and the real installer's name instead of the fixed "Veridian
-    Health" / "Alex" example text every company used to see identically.
-    """
-    text = (BLOCKS_V2_DIR / filename).read_text(encoding="utf-8")
-    for key, value in replacements.items():
-        text = text.replace(f"{{{{{key}}}}}", value)
-    return json.loads(text)
 
 
 def _real_user_name(slack_user_id: str, bot_token: str) -> str:
@@ -61,6 +45,37 @@ def welcome_card_replacements(team_id: str, installer_slack_user_id: str, bot_to
     team_name = (workspace.team_name if workspace else "") or "your organization"
     user_name = _real_user_name(installer_slack_user_id, bot_token)
     return {"TEAM_NAME": team_name, "USER_NAME": user_name}
+
+
+def build_admin_welcome_card(team_id: str, installer_slack_user_id: str, bot_token: str) -> dict:
+    """Rendered as a real image (sir's admin-side "Welcome to
+    TestMyPlan" design), same template-code approach as the other
+    cards -- only the installer's real name actually varies; the
+    4-step overview is identical for everyone. "Get started" stays a
+    real button underneath it."""
+    from django.conf import settings
+
+    from .admin_welcome_card_image import get_admin_welcome_card_image_url
+
+    replacements = welcome_card_replacements(team_id, installer_slack_user_id, bot_token)
+    image_url = get_admin_welcome_card_image_url(settings.BACKEND_URL, replacements["USER_NAME"])
+    return {
+        "blocks": [
+            {"type": "image", "image_url": image_url, "alt_text": "Welcome to TestMyPlan"},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": ":rocket: Get started", "emoji": True},
+                        "action_id": "v2_welcome_next",
+                        "value": "next",
+                        "style": "primary",
+                    }
+                ],
+            },
+        ]
+    }
 
 
 def ensure_preview_channel(team_id: str, bot_token: str) -> str:
@@ -116,8 +131,7 @@ def send_new_design_preview(team_id: str, installer_slack_user_id: str, bot_toke
 
         from .nav_v2 import with_nav_bar_v2
 
-        replacements = welcome_card_replacements(team_id, installer_slack_user_id, bot_token)
-        card = with_nav_bar_v2(_load_v2_card("01-welcome.json", **replacements), "welcome")
+        card = with_nav_bar_v2(build_admin_welcome_card(team_id, installer_slack_user_id, bot_token), "welcome")
         post_card_to_channel(channel_id, card, bot_token)
     except SlackApiError:
         logger.exception("Failed to post new-design welcome card for team %s", team_id)

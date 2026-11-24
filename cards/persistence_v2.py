@@ -66,7 +66,7 @@ def save_visited_combos(team_id: str, combos: set) -> None:
 def load_admins_state(team_id: str) -> dict:
     setup = AdminSetup.objects(team_id=team_id).first()
     assigned = dict(setup.module_admins) if setup else {}
-    selected_modules = list(setup.selected_modules) if setup else ["cyber", "privacy"]
+    selected_modules = list(setup.selected_modules) if setup else ["bc", "cyber", "privacy"]
     return {"assigned": assigned, "expanded": None, "delegate_pick": None, "selected_modules": selected_modules}
 
 

@@ -847,10 +847,18 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
     total_mapped = sum(len(r) for r in resp.values())
     ready = staffed == total
 
-    status_dot = ":large_green_circle:" if ready else ":large_orange_circle:"
+    # Rendered as a real image (sir's design) -- logo+badge, title, and
+    # the staffed/progress-bar/members-added summary. The tier tabs,
+    # team jump select, team tiles, and the selected team's own detail
+    # all stay real Slack elements below -- see teams_card_image.py's
+    # own docstring for why those specifically can't be baked in.
+    from django.conf import settings
+
+    from .teams_card_image import get_teams_card_image_url
+
+    image_url = get_teams_card_image_url(settings.BACKEND_URL, staffed, total, total_members)
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":busts_in_silhouette: Step 2 · Response teams", "emoji": True}},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"{status_dot} *{staffed} / {total} mandatory staffed*  ·  :handshake: {total_members} member(s) added"}]},
+        {"type": "image", "image_url": image_url, "alt_text": "Staff your response teams"},
         {
             "type": "section",
             "text": {
@@ -860,6 +868,21 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
         },
         {"type": "section", "text": {"type": "mrkdwn", "text": ":white_check_mark: *Complete*   ·   :hourglass_flowing_sand: *Pending*"}},
     ]
+
+    if slack_team_id:
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": ":link: Assign on website", "emoji": True},
+                        "action_id": "v2_teams_open_portal",
+                        "value": slack_team_id,
+                    }
+                ],
+            }
+        )
 
     if slack_team_id:
         from plans.resilience_gaps import suggested_teams_and_roles

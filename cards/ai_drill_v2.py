@@ -59,20 +59,19 @@ def build_trigger_picker_card(scenario: GeneratedScenario) -> dict:
     sends everyone a real pre-notification DM before anything else
     happens; No skips straight to the Trigger/Schedule/Surprise picker."""
     breadcrumb = f"{scenario.threat_label}  ›  {scenario.incident_name}  ›  {scenario.cause_name}"
+
+    # Rendered as a real image (sir's design) -- logo+badge, breadcrumb,
+    # title, and the two option boxes. No per-item click target in any
+    # of that (only the two real buttons below actually choose
+    # something), so it's all safe to bake in.
+    from django.conf import settings
+
+    from .trigger_training_card_image import get_trigger_training_card_image_url
+
+    image_url = get_trigger_training_card_image_url(settings.BACKEND_URL, breadcrumb)
     return {
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": ":zap: Step 7 · Trigger", "emoji": True}},
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_"}]},
-            {"type": "section", "text": {"type": "mrkdwn", "text": ":bell: *Training mode?*\nChoose how the team finds out this is starting."}},
-            {"type": "divider"},
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": ":mega: *Yes · Pre-notify*\n_Heads-up DM sent first_"},
-                    {"type": "mrkdwn", "text": ":dash: *No · Go live*\n_No warning, starts immediately_"},
-                ],
-            },
-            {"type": "divider"},
+            {"type": "image", "image_url": image_url, "alt_text": "Training mode?"},
             {
                 "type": "actions",
                 "elements": [
@@ -96,40 +95,54 @@ def build_timing_picker_card(scenario: GeneratedScenario, training_mode: bool, p
     from .trigger_v2_data import TRIGGERS
 
     breadcrumb = f"{scenario.threat_label}  ›  {scenario.incident_name}  ›  {scenario.cause_name}"
-    mode_note = ":white_check_mark: Pre-notification sent." if training_mode else "Sending directly -- no advance warning."
     value_suffix = f"{scenario.id}|{int(training_mode)}"
     action_for_key = {"now": "v2_ai_trigger_now", "sched": "v2_ai_trigger_schedule_open", "surprise": "v2_ai_trigger_surprise"}
 
+    # Rendered as a real image (sir's dark-theme design) -- logo+badge,
+    # breadcrumb, the pre-notification pill, title, and the three
+    # timing tiles. None of that is a per-item click target (the real
+    # buttons below are what actually picks one), so it's all safe to
+    # bake in.
+    from django.conf import settings
+
+    from .trigger_timing_card_image import get_trigger_timing_card_image_url
+
+    image_url = get_trigger_timing_card_image_url(settings.BACKEND_URL, breadcrumb, training_mode)
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":zap: Step 7 · Trigger", "emoji": True}},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_  ·  {mode_note}"}]},
-        {"type": "divider"},
-    ]
-    for key, icon, label, desc in TRIGGERS:
-        is_picked = key == picked
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": (":white_check_mark: " if is_picked else f"{icon} ") + f"*{label}*\n{desc}"},
-                "accessory": {
+        {"type": "image", "image_url": image_url, "alt_text": "When should it fire?"},
+        {
+            "type": "actions",
+            "elements": [
+                {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Picked" if is_picked else "Choose", "emoji": True},
+                    "text": {"type": "plain_text", "text": ("Picked" if key == picked else f"{icon} {label}"), "emoji": True},
                     "action_id": action_for_key[key],
                     "value": value_suffix,
                     **({"style": "danger"} if key == "now" and not picked else {}),
-                },
-            }
-        )
-        blocks.append({"type": "divider"})
+                }
+                for key, icon, label, desc in TRIGGERS
+            ],
+        },
+    ]
     return {"blocks": blocks}
 
 
 def send_pre_notification(scenario: GeneratedScenario, bot_token: str) -> int:
-    """Training mode = Yes: a real heads-up DM to every real person who
-    holds a role targeted anywhere in this scenario, before anything
-    else fires. Returns how many people were actually reached."""
+    """Training mode = Yes: a real heads-up DM (sir's "A drill with your
+    role runs soon" design, cards/heads_up_card_image.py) to every real
+    person who holds a role targeted anywhere in this scenario, before
+    anything else fires. Returns how many people were actually
+    reached."""
+    from django.conf import settings
+
+    from .heads_up_card_image import get_heads_up_card_image_url
+
     roles = {inj.get("target_role", "") for inj in scenario.injects if inj.get("target_role")}
-    breadcrumb = f"{scenario.threat_label} › {scenario.incident_name} › {scenario.cause_name}"
+    # cause_name is "cause1 + cause2 + ..." for an incident-wide scenario
+    # (incident_test_v2.get_or_generate_incident_scenario joins it this
+    # way), or just one cause name for the older per-cause path -- split
+    # back apart so the Causes box can list each one on its own line.
+    causes = [c.strip() for c in (scenario.cause_name or "").split(" + ") if c.strip()]
     sent_to = set()
     for role in roles:
         recipient = _resolve_recipient(scenario.team_id, role)
@@ -138,9 +151,11 @@ def send_pre_notification(scenario: GeneratedScenario, bot_token: str) -> int:
         try:
             opened = _call("conversations.open", bot_token, users=recipient)
             dm_channel_id = opened["channel"]["id"]
+            image_url = get_heads_up_card_image_url(settings.BACKEND_URL, scenario.threat_label, scenario.incident_name, causes, role)
             _call(
                 "chat.postMessage", bot_token, channel=dm_channel_id,
-                text=f":bell: Heads up -- a TestMyPlan drill ({breadcrumb}) involving your role ({role}) will run soon.",
+                text=f"Heads up -- a TestMyPlan drill involving your role ({role}) will run soon.",
+                blocks=[{"type": "image", "image_url": image_url, "alt_text": "A drill with your role runs soon"}],
             )
             sent_to.add(recipient)
         except SlackApiError:
@@ -158,11 +173,14 @@ def build_run_status_card(run: AIExerciseRun, scenario: GeneratedScenario) -> di
     breadcrumb = f"{scenario.threat_label}  ›  {scenario.incident_name}  ›  {scenario.cause_name}"
 
     if run.status == RUN_STATUS_SCHEDULED:
-        status_text = f":alarm_clock: *Scheduled*  ·  {run.scheduled_at.strftime('%d %b %Y, %H:%M UTC')}"
+        title_suffix = "scheduled."
+        subtitle = f"Starts {run.scheduled_at.strftime('%d %b %Y, %H:%M UTC')}. You can watch, inject complications, or pull the report once it's live."
     elif run.status == RUN_STATUS_RUNNING:
-        status_text = ":fire: *Live now*  ·  injects are going out to real people"
+        title_suffix = "running."
+        subtitle = "Injects are going out to real people. Watch, inject complications, or pull the report at any time."
     else:
-        status_text = ":checkered_flag: *Completed*"
+        title_suffix = "complete."
+        subtitle = "Every inject has been sent. Pull the report to see how the team did."
 
     responses = AIDecisionResponse.objects(run=run)
     notified_count = len(responses.distinct("assigned_slack_user_id"))
@@ -172,36 +190,40 @@ def build_run_status_card(run: AIExerciseRun, scenario: GeneratedScenario) -> di
     total_score = sum(r.score for r in scored)
     max_possible = sum(10 for _ in scored)
 
-    participants_text = f"{notified_count} real {'person' if notified_count == 1 else 'people'} DM'd so far" if notified_count else "Nobody reached yet"
-    injects_text = f"{total_injects - answered_count} / {total_injects} remaining" if total_injects else "0"
-    scoring_text = f"{total_score} / {max_possible}" if scored else "No decisions answered yet"
+    participants_caption = f"Real {'person' if notified_count == 1 else 'people'} DM'd so far" if notified_count else "Nobody reached yet"
+    injects_caption = f"{answered_count} answered" if answered_count else "None sent yet"
+    scoring_caption = "No decisions answered yet" if not scored else ""
+
+    badge_text = {
+        RUN_STATUS_SCHEDULED: "SCHEDULED",
+        RUN_STATUS_RUNNING: "LIVE NOW",
+    }.get(run.status, "COMPLETED")
+
+    # Rendered as a real image (sir's dark-theme design) -- logo+badge,
+    # breadcrumb, title, subtitle, and the three stat tiles. None of
+    # that is a per-item click target, so it's all safe to bake in.
+    from django.conf import settings
+
+    from .live_status_card_image import get_live_status_card_image_url
+
+    scoring_value = f"{total_score} / {max_possible}" if scored else "—"
+    image_url = get_live_status_card_image_url(
+        settings.BACKEND_URL, breadcrumb, badge_text, title_suffix, subtitle,
+        f"{notified_count}\n{participants_caption}",
+        f"{total_injects - answered_count}/{total_injects}\n{injects_caption}",
+        f"{scoring_value}\n{scoring_caption}",
+    )
 
     return {
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": breadcrumb, "emoji": True}},
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": status_text}]},
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "The test is running. You can watch, inject complications, or pull the report at any time.",
-                },
-            },
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Participants notified*\n{participants_text}"},
-                    {"type": "mrkdwn", "text": f"*Injects remaining*\n{injects_text}"},
-                    {"type": "mrkdwn", "text": f"*Scoring*\n{scoring_text}"},
-                ],
-            },
+            {"type": "image", "image_url": image_url, "alt_text": "The test is running"},
             {
                 "type": "actions",
                 "elements": [
                     {
                         "type": "button",
                         "text": {"type": "plain_text", "text": "Preparedness report", "emoji": True},
-                        "action_id": "v2_ai_live_report",
+                        "action_id": "v2_ai_drill_overview",
                         "value": str(run.id),
                     },
                     {
@@ -306,53 +328,74 @@ def _fire_next_inject(run: AIExerciseRun, bot_token: str) -> None:
     _send_inject_dm(run, next_inject, bot_token)
 
 
-def build_report_card(run: AIExerciseRun) -> dict:
-    scenario = run.scenario
-    breadcrumb = f"{scenario.threat_label}  ›  {scenario.incident_name}  ›  {scenario.cause_name}"
-    responses = list(AIDecisionResponse.objects(run=run).order_by("sent_at"))
+def build_drill_overview_card(run: AIExerciseRun) -> dict:
+    """Drill Analytics · Overview -- real preparedness score, planned-
+    vs-actual response time, and per-phase breakdown, all computed in
+    cards/drill_analytics.py from this run's actual AIDecisionResponse
+    rows. "Team breakdown" is the only further-drill-down button
+    wired up today (see that module's docstring for why RTO/RPO and
+    privacy-breach views aren't built yet -- they need a drill
+    mechanic this app doesn't capture data for)."""
+    from django.conf import settings
 
-    scored = [r for r in responses if r.score is not None]
-    total_score = sum(r.score for r in scored)
-    max_possible = sum(10 for _ in scored)  # every option set is scored out of 10 in the real options list
+    from . import drill_analytics
+    from .drill_analytics_card_image import get_overview_image_url
 
-    blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":checkered_flag: Drill report", "emoji": True}},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"_{breadcrumb}_"}]},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Total score: {total_score} / {max_possible}*" if scored else "_No decisions were answered._"}},
-        {"type": "divider"},
-    ]
+    data = drill_analytics.compute_overview(run)
+    image_url = get_overview_image_url(settings.BACKEND_URL, data)
 
-    for r in responses:
-        inject = _find_inject(scenario, inject_id=r.inject_id)
-        title = inject.get("title", r.inject_id) if inject else r.inject_id
-        rating_emoji = {"Best": ":large_green_circle:", "Partial": ":large_yellow_circle:", "Poor": ":red_circle:"}.get(r.rating, "")
-        if r.responded_at and r.sent_at:
-            elapsed = (r.responded_at - r.sent_at).total_seconds()
-            elapsed_text = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
-        else:
-            elapsed_text = "no response"
-        lines = [
-            f"*{title}* — To: {r.target_role or '?'}",
-            f"{rating_emoji} {r.rating or 'No answer'}" + (f" ({r.score}/10)" if r.score is not None else "") + f" — responded in {elapsed_text}" if r.responded_at else f"{rating_emoji} No answer recorded",
-        ]
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}})
-
-    return {"blocks": blocks}
-
-
-def build_report_modal_view(run: AIExerciseRun) -> dict:
-    """Same report content as build_report_card, as a real popup modal
-    instead of replacing the Live screen -- sir's call: "Preparedness
-    report" should behave the same way here as it already does on the
-    fixed-plan path (cards/report_modal_v2.py), not open a separate new
-    full-screen card just because this run came from an AI scenario."""
-    card = build_report_card(run)
     return {
-        "type": "modal",
-        "callback_id": "v2_ai_report_modal",
-        "title": {"type": "plain_text", "text": "Preparedness report"},
-        "close": {"type": "plain_text", "text": "Close"},
-        "blocks": card["blocks"],
+        "blocks": [
+            {"type": "image", "image_url": image_url, "alt_text": "Drill analytics overview"},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Team breakdown", "emoji": True},
+                        "action_id": "v2_ai_drill_team_breakdown",
+                        "value": str(run.id),
+                        "style": "primary",
+                    },
+                ],
+            },
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "Preparedness compares planned with actual response time, summed across every team in the drill."}],
+            },
+        ]
+    }
+
+
+def build_drill_team_breakdown_card(run: AIExerciseRun) -> dict:
+    """Drill Analytics · Team breakdown -- per-team planned-vs-actual
+    deviation, ranked slowest-first, plus a real bottleneck (the
+    single slowest answered decision) and single-point-of-failure
+    (a team only one person ever answered for) when the data shows
+    one -- both observed facts from who actually answered, not
+    invented narratives."""
+    from django.conf import settings
+
+    from . import drill_analytics
+    from .drill_analytics_card_image import get_team_breakdown_image_url
+
+    data = drill_analytics.compute_team_breakdown(run)
+    image_url = get_team_breakdown_image_url(settings.BACKEND_URL, data)
+    return {
+        "blocks": [
+            {"type": "image", "image_url": image_url, "alt_text": "Where the time went"},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "← Overview", "emoji": True},
+                        "action_id": "v2_ai_drill_overview",
+                        "value": str(run.id),
+                    },
+                ],
+            },
+        ]
     }
 
 
@@ -390,67 +433,59 @@ def _send_inject_dm(run: AIExerciseRun, inject: dict, bot_token: str, recipient:
     ).save()
 
 
-def _history_blocks(run: AIExerciseRun) -> list:
-    """
-    Same real trail the old fixed-plan drill showed (sir's call): each new
-    decision card lists what's already been decided earlier in THIS run --
-    role, the question they were asked, and what they chose -- so the next
-    person has the same situational awareness a real incident would give
-    them, instead of deciding blind. Score/rating stay admin-only, never
-    shown here.
-    """
-    scenario = run.scenario
-    answered = list(AIDecisionResponse.objects(run=run, chosen_option__ne=None).order_by("sent_at"))
-    if not answered:
-        return []
-
-    lines = []
-    for d in answered:
-        inject = _find_inject(scenario, inject_id=d.inject_id)
-        option = next((o for o in (inject.get("options", []) if inject else []) if o.get("option") == d.chosen_option), None)
-        if not inject or not option:
-            continue
-        role_label = d.target_role or "?"
-        lines.append(f"✓ *{role_label}* — _{inject.get('decision_question', '')}_\n→ {option.get('option_text', '')}")
-
-    if not lines:
-        return []
-
-    blocks = [{"type": "context", "elements": [{"type": "mrkdwn", "text": "`DECISIONS SO FAR`"}]}]
-    # Chunked the same way the rest of this app's long lists are -- keeps
-    # each section block comfortably under Slack's 3000-char text limit
-    # even on a run with many prior decisions.
-    for chunk_start in range(0, len(lines), 4):
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n\n".join(lines[chunk_start:chunk_start + 4])}})
-    blocks.append({"type": "divider"})
-    return blocks
-
-
 def _build_inject_card(run: AIExerciseRun, inject: dict, recipient: str, due_at=None, is_backup: bool = False) -> dict:
-    headline = f":arrows_counterclockwise: {inject.get('title', 'Incident update')} — primary didn't respond in time" if is_backup else f":rotating_light: {inject.get('title', 'Incident update')}"
+    from django.conf import settings
+
+    from .decision_card_image import get_decision_card_image_url
+
+    scenario = run.scenario
+    phases_present = [p for p in scenario.phases if any(i.get("phase") == p for i in scenario.injects)]
+    active_phase = inject.get("phase", "")
+    injects_by_seq = sorted(scenario.injects, key=lambda i: i.get("seq", 0))
+    decision_number = next((idx + 1 for idx, i in enumerate(injects_by_seq) if i.get("inject_id") == inject.get("inject_id")), 1)
+    total_decisions = len(injects_by_seq)
+    inject_message = inject.get("inject_message", "")
+    decision_question = inject.get("decision_question", "")
+    options = inject.get("options", [])
+    option_texts = [opt.get("option_text", "") for opt in options]
+    image_url = get_decision_card_image_url(
+        settings.BACKEND_URL, phases_present, active_phase, decision_number, total_decisions,
+        inject_message, decision_question, option_texts,
+    )
+
+    # Confirmed live: each new question used to arrive bundled together
+    # with the "decisions so far" recap of every PRIOR answer, all in
+    # the same message/screen as the new question -- sir's call: each
+    # new decision card should be its own clean screen, not combined
+    # with the history trail.
+    blocks = [
+        {"type": "image", "image_url": image_url, "alt_text": f"Decision {decision_number} of {total_decisions} — {active_phase}"},
+    ]
+    if is_backup:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f":arrows_counterclockwise: {inject.get('title', 'Incident update')} — primary didn't respond in time"}]})
 
     # Same real deadline display as the rest of this app's decision cards --
-    # Slack's <!date^...> renders in the VIEWER's own local timezone.
+    # Slack's <!date^...> renders in the VIEWER's own local timezone, so
+    # it has to stay real Slack text, not something baked into the image
+    # above (which is the same bytes for every viewer).
     question_label = "`DECISION QUESTION`"
     if due_at:
         ts = int(due_at.replace(tzinfo=datetime.timezone.utc).timestamp())
         question_label += f"   ·   :stopwatch: Respond by <!date^{ts}^{{date_short_pretty}} at {{time}}|the deadline>"
+    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": question_label}]})
 
-    blocks = [
-        *_history_blocks(run),
-        {"type": "header", "text": {"type": "plain_text", "text": headline, "emoji": True}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": inject.get("inject_message", "")}},
-        {"type": "divider"},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": question_label}]},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"*{inject.get('decision_question', '')}*"}},
-    ]
+    # Every option's full wording is already shown inside the image
+    # above (with its own A/B/C badge), so these only need to be the
+    # bare letters -- the actual click still has to be a real Slack
+    # button (Slack can't pin one to a spot inside a picture), but it
+    # doesn't need to repeat the option text sir's design already shows.
     elements = []
-    for opt in inject.get("options", []):
+    for letter, opt in zip("ABCDEFG", options):
         value = f"{run.id}|{inject.get('inject_id', '')}|{opt.get('option', '')}"
         elements.append(
             {
                 "type": "button",
-                "text": {"type": "plain_text", "text": opt.get("option_text", "")[:75], "emoji": True},
+                "text": {"type": "plain_text", "text": letter, "emoji": False},
                 "action_id": f"v2_ai_decision_choose__{opt.get('option', '')}",
                 "value": value,
             }
@@ -481,23 +516,36 @@ def handle_decision(payload: dict, bot_token: str) -> None:
 
     import datetime
 
+    from django.conf import settings
+
+    from .decision_confirm_card_image import get_decision_confirm_card_image_url
+
     response = AIDecisionResponse.objects(run=run, inject_id=inject_id).order_by("-sent_at").first()
+    responded_at = datetime.datetime.utcnow()
     if response:
         response.chosen_option = option
         response.score = opt.get("score")
         response.rating = opt.get("rating")
         response.triggers_inject = opt.get("triggers_inject", "-")
-        response.responded_at = datetime.datetime.utcnow()
+        response.responded_at = responded_at
         response.save()
+
+    options = inject.get("options", [])
+    letter_idx = next((i for i, o in enumerate(options) if o.get("option") == option), 0)
+    letter = "ABCDEFG"[letter_idx] if letter_idx < 7 else "?"
+    role_label = response.target_role if response and response.target_role else "?"
+    if response and response.sent_at:
+        elapsed = int((responded_at - response.sent_at).total_seconds())
+        time_to_decide = f"{elapsed // 60}m {elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
+    else:
+        time_to_decide = "—"
 
     channel_id = payload.get("channel", {}).get("id", "")
     message_ts = payload.get("message", {}).get("ts", "")
-    feedback_card = {
-        "blocks": [
-            {"type": "section", "text": {"type": "mrkdwn", "text": f":white_check_mark: *You chose:* {opt.get('option_text', '')}"}},
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": opt.get("feedback", "")}]},
-        ]
-    }
+    image_url = get_decision_confirm_card_image_url(
+        settings.BACKEND_URL, letter, opt.get("option_text", ""), role_label, time_to_decide, "Arrives when the team is ready",
+    )
+    feedback_card = {"blocks": [{"type": "image", "image_url": image_url, "alt_text": "Your answer is in"}]}
     if channel_id and message_ts and bot_token:
         try:
             _call("chat.update", bot_token, channel=channel_id, ts=message_ts, **feedback_card)

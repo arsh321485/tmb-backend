@@ -43,6 +43,13 @@ def post_card_to_user_dm(slack_user_id: str, card: dict, bot_token: str) -> dict
     return post_card_to_channel(slack_user_id, card, bot_token)
 
 
+def send_dm_text(slack_user_id: str, text: str, bot_token: str) -> dict:
+    """Plain one-off text DM (e.g. the Teams-portal OTP code) -- chat.postMessage
+    accepts a user id directly as "channel" and opens/reuses the DM itself,
+    no separate conversations.open call needed."""
+    return post_card_to_channel(slack_user_id, {"text": text}, bot_token)
+
+
 def publish_home_card(slack_user_id: str, card: dict, bot_token: str) -> dict:
     """card is a views.publish-shaped dict: {"type": "home", "blocks": [...]}."""
     return _call("views.publish", bot_token, user_id=slack_user_id, view=card)

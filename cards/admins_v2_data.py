@@ -7,6 +7,7 @@ same as before) -- but "who" is now a real workspace member
 """
 
 MODULE_ADMINS = [
+    {"id": "bc", "m": "Business Continuity", "note": "Owns failover and recovery against the plan"},
     {"id": "cyber", "m": "Cybersecurity", "note": "Owns the threat map, IR drills and containment scoring"},
     {"id": "privacy", "m": "Privacy", "note": "Owns the 72-hour clock and regulator evidence"},
     # Phase 1 (Read) -- A8/A9. Only this assigned person can upload the
@@ -23,7 +24,7 @@ MODULE_ADMINS = [
 # Which of MODULE_ADMINS the admin can actually turn off -- "plans_bia"
 # isn't a toggle: every org needs someone owning the plan upload
 # regardless of which modules they picked.
-TOGGLEABLE_MODULES = ["cyber", "privacy"]
+TOGGLEABLE_MODULES = ["bc", "cyber", "privacy"]
 
 
 def _select_option(value: str, label: str) -> dict:
@@ -175,39 +176,56 @@ def _admin_row(mod: dict, assigned_code: str | None, expanded: str | None, peopl
     return blocks
 
 
-_MODULE_ICON = {"cyber": ":shield:", "privacy": ":lock:"}
+_MODULE_ICON = {"bc": ":arrows_counterclockwise:", "cyber": ":shield:", "privacy": ":lock:"}
 _MODULE_BLURB = {
-    "cyber": "Threat drills, containment scoring, incident response",
-    "privacy": "72-hour regulator clock, breach evidence, data rights",
+    "bc": "Critical processes, failover and recovery against plan",
+    "cyber": "Threat drills, containment and cyber-resilient recovery",
+    "privacy": "72-hour regulator clock, breach evidence and data rights",
+}
+
+
+_MODULE_IMAGE_ICON = {"bc": "refresh", "cyber": "shield", "privacy": "lock"}
+
+# "SCORED ON" tags shown under each module box -- (text, emphasized).
+# Emphasized tags are the ones that currently drive real scoring logic
+# (RTO/RPO/MTPOD and the containment/detection clocks); the rest are
+# shown as plain, less prominent tags.
+_MODULE_TAGS = {
+    "bc": [("RTO", True), ("RPO", True), ("MTPOD", True), ("Workaround time", False)],
+    "cyber": [("Detect → contain", True), ("Clean rebuild time", True), ("Immutable backup check", False), ("RTO · RPO", False)],
+    "privacy": [("Notification clock", True), ("Detect → contain", True), ("Forensic preservation", False), ("Data-subject impact", False)],
 }
 
 
 def build_admins_card(state: dict, people: list, current_user_id: str) -> dict:
-    selected_modules = state.get("selected_modules") or ["cyber", "privacy"]
+    """Rendered with the header/heading/module-box visuals as a real
+    image (sir's "Select your modules" design) -- the actual toggle
+    still has to be a real Slack checkboxes element underneath it
+    (same reasoning as every other card with a genuine per-item click
+    target), re-rendered with the CURRENT on/off state every time."""
+    from django.conf import settings
+
+    from .module_select_card_image import get_module_select_card_image_url
+
+    selected_modules = state.get("selected_modules") or ["bc", "cyber", "privacy"]
     toggleable = [mod for mod in MODULE_ADMINS if mod["id"] in TOGGLEABLE_MODULES]
     picked_count = sum(1 for mod in toggleable if mod["id"] in selected_modules)
 
+    image_modules = [
+        (
+            _MODULE_IMAGE_ICON.get(mod["id"], "shield"),
+            mod["m"],
+            _MODULE_BLURB.get(mod["id"], mod["note"]),
+            mod["id"] in selected_modules,
+            _MODULE_TAGS.get(mod["id"], []),
+        )
+        for mod in toggleable
+    ]
+    footer_note = "RTO, RPO and MTPOD apply in every module the moment containment takes a system offline."
+    image_url = get_module_select_card_image_url(settings.BACKEND_URL, image_modules, picked_count, len(toggleable), footer_note)
+
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":sparkles: Step 1 · Select your modules", "emoji": True}},
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "Choose which IR domains apply to your org. Nothing here is permanent — you can turn any of these on or off again later.",
-            },
-        },
-        {
-            "type": "context",
-            "elements": [{"type": "mrkdwn", "text": f":large_blue_circle: *{picked_count}/{len(toggleable)}* selected"}],
-        },
-        {"type": "divider"},
-        {
-            "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": f"{_MODULE_ICON.get(mod['id'], ':gear:')} *{mod['m']}*\n{_MODULE_BLURB.get(mod['id'], mod['note'])}"}
-                for mod in toggleable
-            ],
-        },
+        {"type": "image", "image_url": image_url, "alt_text": "Select your modules"},
         {
             "type": "section",
             "block_id": "admin_module_toggle",

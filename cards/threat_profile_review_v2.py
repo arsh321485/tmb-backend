@@ -20,9 +20,8 @@ from .models_v2 import OrgThreatProfile
 CALLBACK_ID_ADD = "v2_tpreview_add_modal"
 CALLBACK_ID_EDIT = "v2_tpreview_edit_modal"
 
-CRIT_EMOJI = {"Critical": "🟫", "High": "🟥", "Med": "🟨"}
 ADD_CRIT_CHOICES = ["Critical", "High", "Med"]
-ADD_MODULE_CHOICES = ["Cybersecurity", "Privacy"]
+ADD_MODULE_CHOICES = ["Business Continuity", "Cybersecurity", "Privacy"]
 LIKELIHOOD_CHOICES = ["High", "Medium-High", "Medium", "Low-Medium", "Low"]
 
 
@@ -46,42 +45,6 @@ def ensure_profile(team_id: str) -> OrgThreatProfile | None:
     return profile
 
 
-def _risk_matrix_blocks(threats: list[dict]) -> list[dict]:
-    """Read-only Threat Category / Likelihood / Business Impact / Overall
-    Risk, as Slack's own 2-column field grid -- confirmed with the admin
-    this is the closest real option to an actual table Slack supports
-    (`fields` only ever wraps 2-per-row, so 4 fields becomes 2 rows of
-    2 instead of one row of 4 -- a real platform limit, not a style
-    choice). A divider between each threat keeps that 2x2 stack reading
-    as one distinct row per threat instead of blurring into the next."""
-    blocks = []
-    for i, t in enumerate(threats):
-        emoji = CRIT_EMOJI.get(t.get("default_crit", "Med"), "🟡")
-        if i > 0:
-            blocks.append({"type": "divider"})
-        # Two separate blocks, not one 4-field block -- Slack only adds
-        # its real visual gap BETWEEN blocks, never between the 2
-        # field-pairs inside a single one, which is why this used to
-        # look like one squashed-together row instead of two.
-        blocks.append(
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Threat Category*\n{t.get('label', '')}"},
-                    {"type": "mrkdwn", "text": f"*Likelihood*\n{t.get('likelihood', 'Medium')}"},
-                ],
-            }
-        )
-        blocks.append(
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Business Impact*\n{t.get('business_impact', 'Not specified')}"},
-                    {"type": "mrkdwn", "text": f"*Overall Risk*\n{emoji} {t.get('default_crit', 'Med')}"},
-                ],
-            }
-        )
-    return blocks
 
 
 def _select_option(value: str, label: str | None = None) -> dict:
@@ -103,7 +66,10 @@ def read_active_module(message_blocks: list) -> str:
     return ""
 
 
-def build_review_card(team_id: str, active_module: str = "") -> dict:
+THREATS_PER_PAGE = 3
+
+
+def build_review_card(team_id: str, active_module: str = "", active_page: int = 0) -> dict:
     profile = ensure_profile(team_id)
 
     if profile is None:
@@ -135,28 +101,51 @@ def build_review_card(team_id: str, active_module: str = "") -> dict:
         }
 
     approved = profile.status == "approved"
-    blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":dart: Your threat profile", "emoji": True}},
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": (
-                        ":large_green_circle: *Approved* -- this is your organization's active threat profile."
-                        if approved
-                        else ":white_circle: *Draft* -- generated from your Organization Details. Review, remove or add threats, then Approve."
-                    ),
-                }
-            ],
-        },
-        {"type": "divider"},
-    ]
 
-    module_icon = {"Cybersecurity": ":shield:", "Privacy": ":lock:"}
+    module_icon = {"Business Continuity": ":arrows_counterclockwise:", "Cybersecurity": ":shield:", "Privacy": ":lock:"}
     modules_present = [m for m in ADD_MODULE_CHOICES if any(t.get("module") == m for t in profile.threats)]
     if active_module not in modules_present:
         active_module = modules_present[0] if modules_present else ""
+
+    shown_threats = [t for t in profile.threats if t.get("module") == active_module]
+
+    # Paginated at THREATS_PER_PAGE per screen -- sir's call: a module
+    # with many threats used to all render into one ever-taller image,
+    # shrinking nothing (font size stayed fixed) but making the card
+    # unwieldy to scroll. Real Prev/Next buttons below page through it
+    # instead, same real-click-target reasoning as the module tabs.
+    total_pages = max(1, (len(shown_threats) + THREATS_PER_PAGE - 1) // THREATS_PER_PAGE)
+    active_page = max(0, min(active_page, total_pages - 1))
+    page_threats = shown_threats[active_page * THREATS_PER_PAGE : (active_page + 1) * THREATS_PER_PAGE]
+
+    # Rendered as two real images -- a short header (logo + badge) and
+    # logo+badge, status, risk-count summary, and every threat, all in
+    # ONE image (sir's call) -- same template-code approach as the
+    # other cards. The module tabs and action buttons below stay real
+    # Slack buttons, since those are genuine click targets a picture
+    # can't provide.
+    from django.conf import settings
+
+    from .threat_profile_card_image import get_threat_profile_card_image_url
+
+    status_key = "approved" if approved else "draft"
+    # Risk-count summary stays for the WHOLE module, not just this page
+    # -- it's a real count of every threat in the module, which would be
+    # misleading if it only reflected the 3 shown on screen right now.
+    counts = {"Critical": 0, "High": 0, "Med": 0}
+    for t in shown_threats:
+        counts[t.get("default_crit", "Med")] = counts.get(t.get("default_crit", "Med"), 0) + 1
+    image_threats = [
+        (t.get("label", ""), t.get("likelihood", "Medium"), t.get("business_impact", "Not specified"), t.get("default_crit", "Med"))
+        for t in page_threats
+    ]
+    active_module_icon = {"Business Continuity": "refresh", "Cybersecurity": "shield", "Privacy": "lock"}.get(active_module, "shield")
+    image_url = get_threat_profile_card_image_url(
+        settings.BACKEND_URL, status_key, counts, image_threats,
+        active_module=active_module, active_module_icon=active_module_icon,
+        active_count=len(shown_threats), total_count=len(profile.threats),
+    )
+    blocks = [{"type": "image", "image_url": image_url, "alt_text": "Your threat profile"}]
 
     if modules_present:
         blocks.append(
@@ -178,25 +167,36 @@ def build_review_card(team_id: str, active_module: str = "") -> dict:
                 ],
             }
         )
-        blocks.append({"type": "divider"})
 
-    shown_threats = [t for t in profile.threats if t.get("module") == active_module]
-
-    if shown_threats:
-        # Same severity-count summary the Threat Mapping screen already
-        # shows under its module tabs -- Threat Approval didn't have one
-        # at all, so there was no quick read of the module's spread
-        # without counting rows by eye. Only 3 real levels exist here
-        # (no separate "Low" tier -- Med is the lowest Agent 1 assigns).
-        counts = {"Critical": 0, "High": 0, "Med": 0}
-        for t in shown_threats:
-            counts[t.get("default_crit", "Med")] = counts.get(t.get("default_crit", "Med"), 0) + 1
-        count_text = "  |  ".join(f"{CRIT_EMOJI[c]} {counts[c]} {c}" for c in ("Critical", "High", "Med"))
-        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": count_text}]})
-        blocks.append({"type": "divider"})
-        blocks.extend(_risk_matrix_blocks(shown_threats))
-    else:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "_No threats in this module._"}})
+    if total_pages > 1:
+        page_elements = []
+        if active_page > 0:
+            page_elements.append(
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "◂ Previous", "emoji": True},
+                    "action_id": "v2_tpreview_page",
+                    "value": f"{active_module}|{active_page - 1}",
+                }
+            )
+        page_elements.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": f"Page {active_page + 1} of {total_pages}", "emoji": True},
+                "action_id": "v2_tpreview_page_noop",
+                "value": "noop",
+            }
+        )
+        if active_page < total_pages - 1:
+            page_elements.append(
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Next ▸", "emoji": True},
+                    "action_id": "v2_tpreview_page",
+                    "value": f"{active_module}|{active_page + 1}",
+                }
+            )
+        blocks.append({"type": "actions", "elements": page_elements})
 
     blocks.append({"type": "divider"})
 
@@ -237,6 +237,13 @@ def build_review_card(team_id: str, active_module: str = "") -> dict:
                         "text": {"type": "plain_text", "text": "Edit again", "emoji": True},
                         "action_id": "v2_tpreview_reopen",
                         "value": "reopen",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Continue → Upload & Analysis", "emoji": True},
+                        "action_id": "v2_tpreview_continue",
+                        "value": "continue",
+                        "style": "primary",
                     },
                 ],
             }

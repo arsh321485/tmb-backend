@@ -23,6 +23,15 @@ _BREADCRUMB_LABELS_BY_LENGTH = {
 }
 
 
+def _breadcrumb_parts(breadcrumb: str) -> list:
+    """Same label-by-position logic as _bold_breadcrumb, but returns
+    [(label, value), ...] tuples for the image renderer instead of a
+    pre-formatted markdown string."""
+    parts = [p.strip() for p in breadcrumb.split("›") if p.strip()]
+    labels = _BREADCRUMB_LABELS_BY_LENGTH.get(len(parts), [])
+    return [(labels[i] if i < len(labels) else "", p) for i, p in enumerate(parts)]
+
+
 def _bold_breadcrumb(breadcrumb: str) -> str:
     """Bolds each segment of a "A  ›  B  ›  C" breadcrumb AND prefixes
     each with its own label (Module/Severity/Threat/Incident/Cause),
@@ -73,12 +82,9 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str, active_phase: str 
         active_phase = phases_present[0] if phases_present else ""
 
     doc_id = str(scenario_doc.id)
+    approved = status == "approved"
 
-    blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":mag: Review Scenario — Phases, Injects & Decisions", "emoji": True}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": _bold_breadcrumb(breadcrumb)}},
-    ]
-
+    mapped_services_text = ""
     # Same real-service lookup shown under this breadcrumb everywhere
     # else it appears (Threat Mapping, Step 6 · Configure test) -- kept
     # consistent here too instead of this one screen being the odd one
@@ -90,12 +96,13 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str, active_phase: str 
             scenario_doc.team_id, {"label": scenario_doc.threat_label, "why": "", "module": scenario_doc.module},
         )
         if mapped:
-            names = ", ".join(f"{s.get('name', '?')} (RTO {s.get('rto', 'unknown')})" for s in mapped)
-            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f":floppy_disk: *Service(s) affected:* {names}"}]})
-    if status == "approved":
-        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ":white_check_mark: *Approved*"}]})
-    blocks.append({"type": "divider"})
+            mapped_services_text = ", ".join(f"{s.get('name', '?')} (RTO {s.get('rto', 'unknown')})" for s in mapped)
 
+    # Phase tabs moved to sit directly under the shared nav bar (sir's
+    # call, live feedback) instead of below the image/context block --
+    # built first so with_nav_bar_v2's prepended nav bar is immediately
+    # followed by these, not by a whole screen's worth of content first.
+    blocks = []
     if phases_present or scenario_doc.consequence_injects:
         tab_elements = [
             {
@@ -118,6 +125,48 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str, active_phase: str 
                 }
             )
         blocks.append({"type": "actions", "elements": tab_elements})
+        blocks.append({"type": "divider"})
+
+    if active_phase == _CONSEQUENCES_TAB:
+        # Consequences tab keeps its own plain breadcrumb/Approved text
+        # (not converted -- see scenario_review_card_image.py's
+        # docstring: its pagination is a separate concern from the
+        # phase-by-phase inject image below).
+        blocks += [
+            {"type": "header", "text": {"type": "plain_text", "text": ":mag: Review Scenario — Phases, Injects & Decisions", "emoji": True}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": _bold_breadcrumb(breadcrumb)}},
+        ]
+        if mapped_services_text:
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f":floppy_disk: *Service(s) affected:* {mapped_services_text}"}]})
+        if approved:
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ":white_check_mark: *Approved*"}]})
+        blocks.append({"type": "divider"})
+    else:
+        # Rendered as a real image (sir's design) -- breadcrumb,
+        # Approved pill, title, and every inject in this phase (none of
+        # it is a per-item click target before this scenario goes live
+        # -- see scenario_review_card_image.py's own docstring).
+        from django.conf import settings
+
+        from .scenario_review_card_image import get_scenario_review_image_url
+
+        phase_injects = [
+            {
+                "seq": inj.get("seq", "?"),
+                "title": inj.get("title", "Untitled"),
+                "role": inj.get("target_role", "?"),
+                "team_label": _team_label_for_role(inj.get("target_role", "?")),
+                "message": inj.get("inject_message", ""),
+                "decision_question": inj.get("decision_question", ""),
+                "options": inj.get("options", []),
+            }
+            for inj in scenario_doc.injects
+            if inj.get("phase") == active_phase
+        ]
+        image_url = get_scenario_review_image_url(settings.BACKEND_URL, _breadcrumb_parts(breadcrumb), approved, phase_injects)
+        blocks.append({"type": "image", "image_url": image_url, "alt_text": "Phases, injects & decisions"})
+        if mapped_services_text:
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f":floppy_disk: *Service(s) affected:* {mapped_services_text}"}]})
         blocks.append({"type": "divider"})
 
     if active_phase == _CONSEQUENCES_TAB:
@@ -181,21 +230,19 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str, active_phase: str 
                 }
             )
         blocks.append({"type": "divider"})
-    else:
-        for inj in scenario_doc.injects:
-            if inj.get("phase") != active_phase:
-                continue
-            role = inj.get("target_role", "?")
-            team_label = _team_label_for_role(role)
-            lines = [f"*{inj.get('seq', '?')}. {inj.get('title', 'Untitled')}* — _{inj.get('phase', '')}_"]
-            lines.append(f"To: *{role}*" + (f"  ·  _{team_label}_" if team_label else ""))
-            lines.append(inj.get("inject_message", ""))
-            lines.append(f"\n*Decision:* {inj.get('decision_question', '')}")
-            for opt in inj.get("options", []):
-                lines.append(f"  • ({opt.get('rating', '?')}, {opt.get('score', '?')}/10) {opt.get('option_text', '')}")
-            block = {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}}
-            blocks.append(block)
-            blocks.append({"type": "divider"})
+    # Non-Consequences phase injects are already fully rendered in the
+    # image above -- nothing further to add here for that branch.
+
+    # Always available (sir's call, live feedback): this screen used to
+    # be a dead end with no way back to the Threat Mapping screen it
+    # came from -- same reasoning as the "Continue to Trigger" button
+    # below for the approved case.
+    back_button = {
+        "type": "button",
+        "text": {"type": "plain_text", "text": "← Back to Threat Mapping", "emoji": True},
+        "action_id": "v2_scenario_back_to_threats",
+        "value": doc_id,
+    }
 
     if status == "approved":
         # There's no separate "Trigger" nav tab any more (sir's call), so
@@ -205,13 +252,14 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str, active_phase: str 
             {
                 "type": "actions",
                 "elements": [
+                    back_button,
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "Continue to Trigger", "emoji": True},
+                        "text": {"type": "plain_text", "text": "Launch test", "emoji": True},
                         "action_id": "v2_scenario_goto_trigger",
                         "value": doc_id,
                         "style": "primary",
-                    }
+                    },
                 ],
             }
         )
@@ -220,6 +268,7 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str, active_phase: str 
             {
                 "type": "actions",
                 "elements": [
+                    back_button,
                     {
                         "type": "button",
                         "text": {"type": "plain_text", "text": "✅ Approve this scenario", "emoji": True},

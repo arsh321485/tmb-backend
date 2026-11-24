@@ -17,37 +17,17 @@ logger = logging.getLogger(__name__)
 
 
 def build_intro_card(recipient_name: str, org_name: str) -> dict:
-    org_bit = f" at {org_name}" if org_name else ""
-    return {
-        "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": ":wave: Welcome to TestMyPlan!", "emoji": True}},
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"Hi {recipient_name}, you've been added to TestMyPlan{org_bit} -- TestMyPlan helps your organization improve cybersecurity incident preparedness through realistic, scenario-based drills.",
-                },
-            },
-            {"type": "section", "text": {"type": "mrkdwn", "text": "*What you'll get here*"}},
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": (
-                        ":bell: *Drill Notifications* -- know the moment a drill starts\n"
-                        ":clipboard: *Task & Decision Cards* -- incident updates and decisions, right in this DM\n"
-                        ":dart: *Respond in Slack* -- submit your decisions directly through the cards\n\n"
-                        ":white_check_mark: *You're all set* -- no action needed right now. We'll message you here when a drill begins."
-                    ),
-                },
-            },
-            {
-                "type": "context",
-                "elements": [{"type": "mrkdwn", "text": ":lock: This is a simulated drill environment -- follow your org's guidelines."}],
-            },
-            {"type": "section", "text": {"type": "mrkdwn", "text": "*TestMyPlan -- Be Prepared. Respond Better.*"}},
-        ]
-    }
+    """Rendered as a real image (sir's "Welcome to TestMyPlan" design),
+    same template-code approach as the other cards -- the design itself
+    has no name/org text in it (the 3 feature boxes and the layout are
+    identical for everyone), so recipient_name/org_name only affect the
+    cache key, not anything actually drawn."""
+    from django.conf import settings
+
+    from .intro_card_image import get_intro_card_image_url
+
+    image_url = get_intro_card_image_url(settings.BACKEND_URL, recipient_name, org_name)
+    return {"blocks": [{"type": "image", "image_url": image_url, "alt_text": "Welcome to TestMyPlan"}]}
 
 
 def send_intro_dm(recipient_slack_user_id: str, recipient_name: str, org_name: str, bot_token: str) -> None:

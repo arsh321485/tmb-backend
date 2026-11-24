@@ -31,7 +31,10 @@ def send_awareness_dms(team_id: str, module: str, threat_key: str, incident_id: 
     the same click without adding any real wait. Returns how many people
     were actually reached.
     """
-    from .cause_awareness_modal_v2 import CAUSE_AWARENESS, _icon_for
+    from django.conf import settings
+
+    from .awareness_card_image import get_awareness_card_image_url, icon_key_for
+    from .cause_awareness_modal_v2 import CAUSE_AWARENESS
     from .models_v2 import Team, TeamMember
     from .slack_client import SlackApiError, _call
     from .threat_profile_review_v2 import resolve_names
@@ -41,27 +44,25 @@ def send_awareness_dms(team_id: str, module: str, threat_key: str, incident_id: 
 
     _, incident_name, _ = resolve_names(team_id, module, threat_key, incident_id, causes[0]["id"])
 
-    blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": f":bulb: Awareness — {incident_name}", "emoji": True}},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": "Before this incident gets tested, here's what you should know about how it can happen."}]},
-        {"type": "divider"},
-    ]
+    # Rendered as a real image (sir's "Before it's tested" design) --
+    # same template-code approach as the other cards. The reference
+    # design shows ONE flowing description per cause, not separate
+    # "What it is" / "Why it matters" labels, so what+why are joined
+    # into one sentence here.
+    card_causes: list[tuple[str, str, str]] = []
     for cause in causes:
         cause_id = cause.get("id", "")
         cause_name = cause.get("name", cause_id)
         fixed = CAUSE_AWARENESS.get(cause_id)
         if fixed:
-            icon, what, why = fixed.get("icon", ":small_blue_diamond:"), fixed.get("what", ""), fixed.get("why", "")
+            fixed_emoji, what, why = fixed.get("icon", ""), fixed.get("what", ""), fixed.get("why", "")
         else:
-            icon, what, why = _icon_for(cause_name), cause.get("what", ""), cause.get("why", "")
-        lines = [f"{icon} *{cause_name}*"]
-        if what:
-            lines.append(f"*What it is:* {what}")
-        if why:
-            lines.append(f"*Why it matters:* {why}")
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}})
-        blocks.append({"type": "divider"})
-    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ":test_tube: This is a readiness drill, not a real incident — just a heads-up before it starts."}]})
+            fixed_emoji, what, why = "", cause.get("what", ""), cause.get("why", "")
+        description = f"{what} {why}".strip() if what and why else (what or why)
+        card_causes.append((cause_name, description, icon_key_for(cause_name, fixed_emoji)))
+
+    image_url = get_awareness_card_image_url(settings.BACKEND_URL, incident_name, card_causes)
+    blocks = [{"type": "image", "image_url": image_url, "alt_text": f"Awareness — {incident_name}"}]
 
     sent_to = set()
     for team_doc in Team.objects(team_id=team_id):

@@ -81,15 +81,42 @@ def _nearest_band(value: str, bands: list, band_hours: dict) -> str:
     return bands[-1]
 
 
-def _summary_text(plan) -> str:
-    items = plan.draft_research_items or []
-    lines = []
-    for i in items[:10]:  # keep well under the block's own text-length limits
-        val = (i.get("value") or "")[:200]
-        lines.append(f"*{i.get('id', '')} {i.get('title', '')}:* {val}")
-    if len(items) > 10:
-        lines.append(f"_+ {len(items) - 10} more research items not shown here._")
-    return "\n\n".join(lines) or "No research summary available."
+# Real safety ceiling, not an arbitrary display choice -- a modal view
+# allows up to 100 blocks total and the other fixed Q&A blocks around
+# this use roughly 20 of them, so this leaves comfortable room even
+# split one section block per few items.
+MAX_RESEARCH_ITEMS_SHOWN = 30
+_RESEARCH_ITEMS_PER_BLOCK = 5
+
+
+def _summary_blocks(plan) -> list:
+    """Every A1..A19 research item as real section blocks, chunked a
+    few items per block instead of one giant block -- a single
+    section block's text caps at 3000 characters, which is what used
+    to force truncating to 10 items ("+ N more... not shown") even
+    though the modal itself had plenty of room left for the rest."""
+    items = (plan.draft_research_items or [])[:MAX_RESEARCH_ITEMS_SHOWN]
+    if not items:
+        return [{"type": "section", "text": {"type": "mrkdwn", "text": "No research summary available."}}]
+
+    blocks = []
+    for start in range(0, len(items), _RESEARCH_ITEMS_PER_BLOCK):
+        chunk = items[start : start + _RESEARCH_ITEMS_PER_BLOCK]
+        lines = []
+        for i in chunk:
+            val = (i.get("value") or "")[:200]
+            lines.append(f"*{i.get('id', '')} {i.get('title', '')}:* {val}")
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n\n".join(lines)}})
+
+    total = len(plan.draft_research_items or [])
+    if total > MAX_RESEARCH_ITEMS_SHOWN:
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": f"_+ {total - MAX_RESEARCH_ITEMS_SHOWN} more research items not shown here._"}],
+            }
+        )
+    return blocks
 
 
 def build_modal_view(plan, channel_id: str = "", message_ts: str = "") -> dict:
@@ -98,7 +125,7 @@ def build_modal_view(plan, channel_id: str = "", message_ts: str = "") -> dict:
 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": "1. Is the researched profile correct?", "emoji": True}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": _summary_text(plan)}},
+        *_summary_blocks(plan),
         {
             "type": "input",
             "block_id": "q1_edits",

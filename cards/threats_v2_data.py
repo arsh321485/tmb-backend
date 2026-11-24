@@ -268,56 +268,35 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
     for c in custom:
         counts[c["crit"]] += 1
 
-    blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":dart: STEP 3 · ORGANIZATIONAL THREATS", "emoji": True}},
-        {
-            "type": "context",
-            "elements": [
-                {"type": "mrkdwn", "text": f"🟥 *{total_kept} threats*"}
-            ],
-        },
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": (
-                        f"🟫 *{counts['Critical']}* Critical   |   "
-                        f"🟥 *{counts['High']}* High   |   "
-                        f"🟨 *{counts['Med']}* Med   |   "
-                        f"⬜ *{counts['Dropped']}* Dropped"
-                    ),
-                }
-            ],
-        },
-        *(
-            [{"type": "context", "elements": [{"type": "mrkdwn", "text": f":mag: {research_context}"}]}]
-            if research_context
-            else []
-        ),
-        {"type": "divider"},
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": (
-                    ">Generated from what you told us at sign-up — nothing to fill in, and it comes first: the threats decide "
-                    "which modules you need admins and teams for. Drop anything that doesn't apply, or change a criticality."
-                ),
-            },
-        },
-    ]
+    # Rendered as a real image (sir's design) -- logo+badge, title,
+    # intro paragraph, severity bar+legend, and the Sector/Region/
+    # Regulation/By-Module stat tiles. The module tabs, criticality
+    # tabs, and every threat row below all stay real Slack elements --
+    # see threat_map_header_card_image.py's own docstring.
+    from django.conf import settings
 
-    if profile and (profile.get("industry") or profile.get("regions") or profile.get("regulations")):
-        tags = []
-        if profile.get("industry"):
-            tags.append(f":office: *Sector*  {profile['industry']}")
-        if profile.get("regions"):
-            tags.append(f":globe_with_meridians: *Regions*  {' · '.join(profile['regions'])}")
-        if profile.get("regulations"):
-            tags.append(f":scales: *Regulation*  {' · '.join(profile['regulations'])}")
-        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "     ".join(tags)}]})
-        blocks.append({"type": "divider"})
+    from .threat_map_header_card_image import get_threat_map_header_image_url
+
+    _module_short = {"Cybersecurity": "Cyber", "Privacy": "Privacy"}
+    module_bits = []
+    for module in MODULES:
+        mod_fixed_count = [t for t in threats if t["module"] == module]
+        mod_custom_count = [c for c in custom if c["module"] == module]
+        mod_kept_count = len([t for t in mod_fixed_count if fixed_state.get(t["key"], t["default_crit"]) != "Dropped"]) + \
+            len([c for c in mod_custom_count if c["crit"] != "Dropped"])
+        module_bits.append(f"{_module_short.get(module, module)} {mod_kept_count}")
+    module_summary = " · ".join(module_bits)
+
+    sector = profile.get("industry", "") if profile else ""
+    region_text = " · ".join(profile.get("regions") or []) if profile else ""
+    regulation_text = " · ".join(profile.get("regulations") or []) if profile else ""
+
+    image_url = get_threat_map_header_image_url(
+        settings.BACKEND_URL, total_kept, counts, sector, region_text, regulation_text, module_summary
+    )
+    blocks = [{"type": "image", "image_url": image_url, "alt_text": "Organizational threats"}]
+    if research_context:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f":mag: {research_context}"}]})
 
     # Strict step-by-step disclosure (sir's call): nothing below a level
     # shows until that level has been explicitly clicked -- no
@@ -427,18 +406,26 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
         if active_item["crit"] == "Dropped":
             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "_Dropped — won't be part of this test._"}})
         else:
-            detail_text = f"*Why critical:* {active_item['why']}"
-            if active_item.get("business_impact"):
-                detail_text += f"\n*Impact if it happens:* {active_item['business_impact']}"
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": detail_text}})
-
+            mapped_services = []
             if team_id and not active_item["custom"]:
                 from plans.threat_ranking import mapped_services_for_threat
 
                 mapped = mapped_services_for_threat(team_id, {"label": active_item["label"], "why": active_item["why"], "module": active_module})
-                if mapped:
-                    lines = "\n".join(f"  • {s.get('name', '?')} (RTO {s.get('rto', 'unknown')})" for s in mapped)
-                    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Mapped services from your plan:*\n{lines}"}})
+                mapped_services = [(s.get("name", "?"), s.get("rto", "unknown")) for s in mapped]
+
+            # Rendered as a real image (sir's design) -- the threat's own
+            # read-only detail (why it's critical, impact, mapped real
+            # services). No logo/badge of its own -- it's an embedded
+            # content box under the real tabs above, not a full card.
+            from django.conf import settings
+
+            from .threat_drilldown_card_image import get_threat_detail_image_url
+
+            detail_image_url = get_threat_detail_image_url(
+                settings.BACKEND_URL, active_item["label"], active_item.get("why", ""), active_item.get("business_impact", ""), mapped_services,
+                crit=active_item["crit"],
+            )
+            blocks.append({"type": "image", "image_url": detail_image_url, "alt_text": active_item["label"]})
 
             # Incident tabs, reusing the same real taxonomy the later
             # Threat map step already has (same threat IDs) -- shown
@@ -499,39 +486,68 @@ def build_org_threats_card(state: dict, profile: dict | None = None, team_id: st
                     # together as a single combined drill
                     # (cards/incident_test_v2.py).
                     blocks.append({"type": "divider"})
-                    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "`CAUSES`"}]})
-                    blocks.append(
-                        {
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": "\n".join(f"• {c['name']}" for c in causes)},
-                        }
+                    # Rendered as a real image (sir's design) -- the
+                    # causes list is read-only here (nothing to click on
+                    # any one cause individually; "Build scenario" below
+                    # runs all of them together), so it's safe to bake in.
+                    from django.conf import settings
+
+                    from .threat_drilldown_card_image import get_incident_causes_image_url
+
+                    causes_image_url = get_incident_causes_image_url(
+                        settings.BACKEND_URL, selected_incident["name"], [c["name"] for c in causes]
                     )
-                    blocks.append(
+                    blocks.append({"type": "image", "image_url": causes_image_url, "alt_text": selected_incident["name"]})
+
+                    # Whether a combined scenario already exists for this
+                    # exact Incident (same lookup incident_test_v2.py's
+                    # get_or_generate_incident_scenario uses) -- if so,
+                    # offer a way straight back to it instead of only
+                    # "Build scenario" (which just returns the same
+                    # existing one anyway, but with no indication one
+                    # already exists until clicked).
+                    existing_scenario = None
+                    if team_id:
+                        from .models_v2 import GeneratedScenario
+
+                        existing_scenario = GeneratedScenario.objects(
+                            team_id=team_id, module=active_module, threat_id=raw_key,
+                            incident_id=selected_incident["id"], cause_id="",
+                        ).order_by("-created_at").first()
+
+                    scenario_action_elements = []
+                    if existing_scenario:
+                        scenario_action_elements.append(
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": ":eyes: View scenario", "emoji": True},
+                                "action_id": "v2_cfgtest_view_scenario",
+                                "value": str(existing_scenario.id),
+                                "style": "primary",
+                            }
+                        )
+                    scenario_action_elements.append(
                         {
-                            "type": "actions",
-                            "elements": [
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": ":sparkles: Build scenario" if not existing_scenario else "↻ Rebuild scenario", "emoji": True},
+                            "action_id": "v2_cfgtest_run_incident",
+                            "value": json.dumps(
                                 {
-                                    "type": "button",
-                                    "text": {"type": "plain_text", "text": ":sparkles: Build scenario", "emoji": True},
-                                    "action_id": "v2_cfgtest_run_incident",
-                                    "value": json.dumps(
-                                        {
-                                            "module": active_module,
-                                            "threat_key": raw_key,
-                                            "incident_id": selected_incident["id"],
-                                            "breadcrumb": {
-                                                "module": active_module,
-                                                "crit": active_crit,
-                                                "threat": active_item["label"],
-                                                "incident": selected_incident["name"],
-                                            },
-                                        }
-                                    ),
-                                    "style": "danger",
+                                    "module": active_module,
+                                    "threat_key": raw_key,
+                                    "incident_id": selected_incident["id"],
+                                    "breadcrumb": {
+                                        "module": active_module,
+                                        "crit": active_crit,
+                                        "threat": active_item["label"],
+                                        "incident": selected_incident["name"],
+                                    },
                                 }
-                            ],
+                            ),
+                            **({"style": "danger"} if not existing_scenario else {}),
                         }
                     )
+                    blocks.append({"type": "actions", "elements": scenario_action_elements})
             elif not active_item["custom"]:
                 blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No incidents mapped for this threat yet._"}]})
 

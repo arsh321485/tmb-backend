@@ -160,14 +160,26 @@ def _redraw_admins(response_url: str, bot_token: str, current_user_id: str, stat
 
 
 def _redraw_bia_upload(response_url: str, slack_team_id: str, channel_id: str = "", message_ts: str = "", user_id: str = "", bot_token: str = "") -> None:
-    _replace_message(response_url, with_nav_bar_v2(build_bia_upload_card(slack_team_id, user_id, bot_token), "bia_upload"))
+    _replace_message(
+        response_url,
+        with_nav_bar_v2(build_bia_upload_card(slack_team_id, user_id, bot_token), "bia_upload"),
+        bot_token=bot_token,
+        channel_id=channel_id,
+        message_ts=message_ts,
+    )
     if slack_team_id and channel_id and message_ts:
         persistence_v2.save_bia_upload_card_location(slack_team_id, channel_id, message_ts)
 
 
 def _redraw_teams(response_url: str, bot_token: str, state: dict, slack_team_id: str = "", channel_id: str = "", message_ts: str = "") -> None:
     people = get_workspace_people(bot_token)
-    _replace_message(response_url, with_nav_bar_v2(build_teams_card(state, people, slack_team_id=slack_team_id), "teams"))
+    _replace_message(
+        response_url,
+        with_nav_bar_v2(build_teams_card(state, people, slack_team_id=slack_team_id), "teams"),
+        bot_token=bot_token,
+        channel_id=channel_id,
+        message_ts=message_ts,
+    )
     if slack_team_id and channel_id and message_ts:
         persistence_v2.save_teams_card_location(slack_team_id, channel_id, message_ts)
 
@@ -207,6 +219,22 @@ def handle_block_action_v2(payload: dict) -> None:
             _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=action.get("value", "")), "threat_review"))
         return
 
+    if action_id == "v2_tpreview_page_noop":
+        return
+
+    if action_id == "v2_tpreview_page":
+        from . import threat_profile_review_v2
+
+        value = action.get("value", "")
+        module, _, page_str = value.rpartition("|")
+        try:
+            page = int(page_str)
+        except ValueError:
+            page = 0
+        if response_url:
+            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=module, active_page=page), "threat_review"))
+        return
+
     if action_id == "v2_tpreview_retry":
         from . import threat_profile_review_v2
 
@@ -227,6 +255,21 @@ def handle_block_action_v2(payload: dict) -> None:
         from .bia_upload_v2_data import build_bia_question_card, _latest_plan
 
         threat_profile_review_v2.approve_profile(slack_team_id)
+        if slack_team_id and _latest_plan(slack_team_id) is not None:
+            _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts, current_user_id, bot_token)
+        else:
+            _replace_message(response_url, with_nav_bar_v2(build_bia_question_card(), "bia_upload"))
+            if slack_team_id and top_channel_id and top_message_ts:
+                persistence_v2.save_bia_upload_card_location(slack_team_id, top_channel_id, top_message_ts)
+        return
+
+    if action_id == "v2_tpreview_continue":
+        # Same destination as Approve's own continue step, but for an
+        # already-approved profile -- sir's call: without this, getting
+        # back here (e.g. via the nav bar) left no way forward except
+        # Edit again -> Approve, even though nothing needed re-approving.
+        from .bia_upload_v2_data import build_bia_question_card, _latest_plan
+
         if slack_team_id and _latest_plan(slack_team_id) is not None:
             _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts, current_user_id, bot_token)
         else:
@@ -432,11 +475,10 @@ def handle_block_action_v2(payload: dict) -> None:
         return
 
     if action_id == "v2_nav_jump__welcome":
-        from .onboarding_v2 import welcome_card_replacements
+        from .onboarding_v2 import build_admin_welcome_card
 
-        replacements = welcome_card_replacements(slack_team_id, current_user_id, bot_token)
-        _replace_message(response_url, with_nav_bar_v2(_load_v2_card("01-welcome.json", **replacements), "welcome"))
-        return
+        card = build_admin_welcome_card(slack_team_id, current_user_id, bot_token)
+        _replace_message(response_url, with_nav_bar_v2(card, "welcome"), bot_token, top_channel_id, top_message_ts)
         return
 
     # A criticality dropdown changed on an existing (fixed or custom)
@@ -650,6 +692,22 @@ def handle_block_action_v2(payload: dict) -> None:
         _replace_message(response_url, with_nav_bar_v2(card, "org_threats"), bot_token, top_channel_id, top_message_ts)
         return
 
+    if action_id == "v2_cfgtest_view_scenario":
+        # Jumps straight to an already-built scenario's review screen
+        # instead of making the admin click "Build scenario" again just
+        # to see the same thing (which does nothing new -- it's the same
+        # combined lookup get_or_generate_incident_scenario already does).
+        from .models_v2 import GeneratedScenario
+        from .scenario_v2_data import build_scenario_review_card
+
+        doc = GeneratedScenario.objects(id=action.get("value", "")).first()
+        if not doc or not response_url:
+            return
+        scenario_breadcrumb = "  ›  ".join(v for v in (doc.threat_label, doc.incident_name, doc.cause_name) if v)
+        card = build_scenario_review_card(doc, scenario_breadcrumb)
+        _replace_message(response_url, with_nav_bar_v2(card, "org_threats"), bot_token, top_channel_id, top_message_ts)
+        return
+
     if action_id == "v2_nav_jump__org_threats":
         state = persistence_v2.load_threats_state(slack_team_id)
         _redraw_threats(response_url, state, slack_team_id, bot_token, top_channel_id, top_message_ts)
@@ -720,7 +778,7 @@ def handle_block_action_v2(payload: dict) -> None:
         # Drop assignments for modules the org just turned off -- no point
         # keeping an admin set on a module they said doesn't apply.
         for mod_id in list(state["assigned"]):
-            if mod_id in ("cyber", "privacy") and mod_id not in selected:
+            if mod_id in ("bc", "cyber", "privacy") and mod_id not in selected:
                 state["assigned"].pop(mod_id, None)
         persistence_v2.save_admins_state(slack_team_id, state["assigned"])
         _redraw_admins(response_url, bot_token, current_user_id, state)
@@ -728,7 +786,7 @@ def handle_block_action_v2(payload: dict) -> None:
 
     if action_id == "v2_admin_take_all":
         state = read_admins_state(message_blocks)
-        for mod in state.get("selected_modules") or ("cyber", "privacy"):
+        for mod in state.get("selected_modules") or ("bc", "cyber", "privacy"):
             state["assigned"][mod] = current_user_id
         state["assigned"]["plans_bia"] = current_user_id
         state["expanded"] = None
@@ -813,8 +871,13 @@ def handle_block_action_v2(payload: dict) -> None:
     if action_id == "v2_admins_done":
         from . import threat_profile_review_v2
 
-        if response_url:
-            _replace_message(response_url, with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"))
+        _replace_message(
+            response_url,
+            with_nav_bar_v2(threat_profile_review_v2.build_review_card(slack_team_id, active_module=threat_profile_review_v2.read_active_module(message_blocks)), "threat_review"),
+            bot_token=bot_token,
+            channel_id=top_channel_id,
+            message_ts=top_message_ts,
+        )
         return
 
     # Clicking the "Upload & Analysis" nav tab directly still jumps
@@ -836,7 +899,20 @@ def handle_block_action_v2(payload: dict) -> None:
                 persistence_v2.save_bia_upload_card_location(slack_team_id, top_channel_id, top_message_ts)
         return
 
-    if action_id in ("v2_bia_have_doc_yes", "v2_bia_check_again"):
+    if action_id == "v2_bia_have_doc_yes":
+        # A real "Yes" click (either "Yes, I have it" on the first
+        # screen, or "I have it now" on the GRC-options screen -- same
+        # action_id, same meaning) -- the only trigger that sends the
+        # upload-prompt DM. "Check again" below shares the same redraw
+        # but must NOT re-send it.
+        from .bia_upload_v2_data import send_upload_prompt_dm
+
+        if slack_team_id and current_user_id and bot_token:
+            send_upload_prompt_dm(slack_team_id, current_user_id, bot_token)
+        _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts, current_user_id, bot_token)
+        return
+
+    if action_id == "v2_bia_check_again":
         _redraw_bia_upload(response_url, slack_team_id, top_channel_id, top_message_ts, current_user_id, bot_token)
         return
 
@@ -965,6 +1041,43 @@ def handle_block_action_v2(payload: dict) -> None:
         _redraw_teams(response_url, bot_token, persistence_v2.load_teams_state(slack_team_id), slack_team_id, top_channel_id, top_message_ts)
         return
 
+    if action_id == "v2_teams_open_portal":
+        # Signs a short-lived launch token from the real team_id + the
+        # real clicking user's slack_user_id Slack just handed us on this
+        # very click (teams_portal/views.py verifies this token server
+        # side before ever DMing an OTP) -- posted back as an EPHEMERAL
+        # message (response_type="ephemeral", no replace_original) so the
+        # real Teams card in the channel is untouched, only the clicker
+        # sees the link.
+        from django.conf import settings
+
+        from teams_portal.views import make_launch_token
+
+        if response_url and slack_team_id and current_user_id:
+            launch_token = make_launch_token(slack_team_id, current_user_id)
+            portal_url = f"{settings.FRONTEND_URL}/teams-portal?token={launch_token}"
+            requests.post(
+                response_url,
+                json={
+                    "response_type": "ephemeral",
+                    "replace_original": False,
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": "Opens for you only, expires in 5 minutes -- we'll DM you a code to confirm it's really you."},
+                            "accessory": {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": "Open Teams on website", "emoji": True},
+                                "url": portal_url,
+                                "style": "primary",
+                            },
+                        }
+                    ],
+                },
+                timeout=10,
+            )
+        return
+
     if action_id.startswith("v2_team_priority_tab__"):
         state = read_teams_state(message_blocks)
         saved = persistence_v2.load_teams_state(slack_team_id)
@@ -1043,7 +1156,11 @@ def handle_block_action_v2(payload: dict) -> None:
             if member:
                 member.acknowledged_by[current_user_id] = now
                 member.save()
-            card = role_welcome_v2.build_ack_done_card(now.strftime("%d %b %Y, %H:%M UTC"))
+            # Stored as UTC (so it stays comparable/consistent in the
+            # database), but shown to the person in IST -- the admin's
+            # real workspace timezone -- not the raw UTC they clicked in.
+            now_ist = now + datetime.timedelta(hours=5, minutes=30)
+            card = role_welcome_v2.build_ack_done_card(now_ist.strftime("%d %b %Y, %H:%M IST"))
 
             # Push the acknowledgment straight to the admin's open
             # Configure Teams card in real time -- sir's call: status
@@ -1628,22 +1745,62 @@ def handle_block_action_v2(payload: dict) -> None:
             _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_trigger_picker_card(doc), "trigger"), bot_token, top_channel_id, top_message_ts)
         return
 
-    if action_id == "v2_ai_live_report":
+    if action_id == "v2_scenario_back_to_threats":
+        # The Scenario Review screen replaces the Threat Mapping message
+        # entirely (same message, swapped via chat.update/response_url),
+        # so there was no way back to it without this -- rebuilds the
+        # exact Module/Criticality/Threat/Incident position this
+        # scenario was generated from, from the scenario doc's own real
+        # module/threat_id/incident_id, not a guess.
+        from . import org_setup_v2
+        from .models_v2 import GeneratedScenario, OrgThreatProfile
+        from .threats_v2_data import THREATS
+
+        doc = GeneratedScenario.objects(id=action.get("value", "")).first()
+        if not doc or not response_url:
+            return
+
+        saved = persistence_v2.load_threats_state(slack_team_id) if slack_team_id else {"fixed": {}, "custom": []}
+        state = {"fixed": saved.get("fixed", {}), "custom": saved.get("custom", []), "form": None}
+        state["active_module"] = doc.module
+        state["active_threat"] = doc.threat_id
+        state["active_incident"] = doc.incident_id
+
+        default_crit = None
+        if slack_team_id:
+            from plans.threat_ranking import rank_threats
+
+            approved_profile = OrgThreatProfile.objects(team_id=slack_team_id, status="approved").first()
+            base_threats = approved_profile.threats if approved_profile else THREATS
+            threats = rank_threats(slack_team_id, base_threats)
+            default_crit = next((t["default_crit"] for t in threats if t["key"] == doc.threat_id), None)
+        state["active_crit"] = state["fixed"].get(doc.threat_id, default_crit)
+
+        profile = org_setup_v2.load_profile(slack_team_id) if slack_team_id else None
+        card = with_nav_bar_v2(build_org_threats_card(state, profile, team_id=slack_team_id), "org_threats")
+        _replace_message(response_url, card, bot_token, top_channel_id, top_message_ts)
+        return
+
+    if action_id == "v2_ai_drill_overview":
         from . import ai_drill_v2
         from .models_v2 import AIExerciseRun
 
         run = AIExerciseRun.objects(id=action.get("value", "")).first()
         if not run:
             return
-        trigger_id = payload.get("trigger_id", "")
-        if trigger_id and bot_token:
-            requests.post(
-                "https://slack.com/api/views.open",
-                headers={"Authorization": f"Bearer {bot_token}"},
-                json={"trigger_id": trigger_id, "view": ai_drill_v2.build_report_modal_view(run)},
-                timeout=10,
-            )
+        _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_drill_overview_card(run), "trigger"), bot_token=bot_token, channel_id=top_channel_id, message_ts=top_message_ts)
         return
+
+    if action_id == "v2_ai_drill_team_breakdown":
+        from . import ai_drill_v2
+        from .models_v2 import AIExerciseRun
+
+        run = AIExerciseRun.objects(id=action.get("value", "")).first()
+        if not run:
+            return
+        _replace_message(response_url, with_nav_bar_v2(ai_drill_v2.build_drill_team_breakdown_card(run), "trigger"), bot_token=bot_token, channel_id=top_channel_id, message_ts=top_message_ts)
+        return
+
 
     if action_id == "v2_live_inject":
         trigger_id = payload.get("trigger_id", "")

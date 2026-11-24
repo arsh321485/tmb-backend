@@ -25,7 +25,7 @@ _PRIVACY_KEYWORDS = (
 )
 
 _HOUR_UNITS = {
-    "hour": 1, "hours": 1, "hr": 1, "hrs": 1,
+    "hour": 1, "hours": 1, "hr": 1, "hrs": 1, "h": 1,
     "minute": 1 / 60, "minutes": 1 / 60, "min": 1 / 60, "mins": 1 / 60,
     "day": 24, "days": 24,
     "week": 168, "weeks": 168,
@@ -50,7 +50,11 @@ def _rto_to_hours(rto_text: str) -> float | None:
     t = rto_text.lower()
     if "immediate" in t or "near zero" in t or "real-time" in t or "real time" in t or "asap" in t:
         return 0.0
-    match = re.search(r"(\d+(?:\.\d+)?)\s*(hour|hours|hrs|hr\b|minute|minutes|mins|min\b|day|days|week|weeks|month|months)", t)
+    # "h\b" added for the compact "8h"/"24h"/"72h" style real documents
+    # also use (no space, no full word "hour") -- confirmed live: these
+    # silently fell through to "unknown" before, same bug class as the
+    # "4 Hrs"/"15 minutes" fix above.
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(hour|hours|hrs|hr\b|h\b|minute|minutes|mins|min\b|day|days|week|weeks|month|months)", t)
     if not match:
         return None
     value, unit = match.groups()

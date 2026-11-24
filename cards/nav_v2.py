@@ -13,6 +13,12 @@ NAV_STEPS_V2 = [
     ("Upload & Analysis", "bia_upload"),
     ("Teams", "teams"),
     ("Threat Mapping", "org_threats"),
+    # Goes to the Trigger tab (cards/interactivity_v2.py's
+    # "v2_nav_jump__trigger" handler) -- not a step of its own, it's
+    # the same destination "Continue to Trigger" already goes to:
+    # whichever drill is actually live right now, or the next
+    # approved-but-unrun scenario's Training-mode question.
+    ("TestMyPlan", "trigger"),
 ]
 
 

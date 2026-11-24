@@ -29,30 +29,28 @@ def parse_value(value: str) -> tuple[str, str, bool]:
 
 
 def build_welcome_card(recipient_name: str, catalog_team_id: str, team_name: str, role: str, is_backup: bool) -> dict:
-    badge = ":large_orange_circle: *BACKUP*" if is_backup else ":large_green_circle: *RESPONSE TEAM*"
+    """
+    Rendered as a real image, same template-code approach as
+    role_card_image.py -- replaces the earlier static
+    role_welcome_banner.png, which had "Welcome, Dikshika" baked in
+    and would have shown THAT name to every single person instead of
+    whoever was actually being welcomed. cards/welcome_card_image.py
+    draws sir's design filled in with the real recipient name and
+    real team/role, in well under a second.
+    """
+    from django.conf import settings
+
+    from .welcome_card_image import get_welcome_card_image_url
+
+    badge_label = "BACKUP" if is_backup else "RESPONSE TEAM"
+    image_url = get_welcome_card_image_url(settings.BACKEND_URL, recipient_name, badge_label, f"{team_name} · {role}")
+
     return {
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": f":wave: Welcome, {recipient_name}!", "emoji": True}},
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"{badge}  ·  {team_name}"}]},
             {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": ":speech_balloon: This DM is where your drill runs — every step arrives as one card at a time, nothing to install."},
-            },
-            {"type": "divider"},
-            {"type": "section", "text": {"type": "mrkdwn", "text": ":sparkles: *HOW IT WORKS*"}},
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": ":one: *Review*\nYour assigned role and responsibilities"},
-                    {"type": "mrkdwn", "text": ":two: *Read*\nEach task card as it arrives"},
-                ],
-            },
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": ":three: *Respond*\nDirectly in the card — logged and timed"},
-                    {"type": "mrkdwn", "text": ":four: *Complete*\nAll tasks before the exercise ends"},
-                ],
+                "type": "image",
+                "image_url": image_url,
+                "alt_text": f"Welcome, {recipient_name} — TestMyPlan",
             },
             {"type": "divider"},
             {
@@ -76,66 +74,60 @@ def build_welcome_card(recipient_name: str, catalog_team_id: str, team_name: str
 
 
 def build_role_card(catalog_team_id: str, team_name: str, role: str, primary_name: str, backup_name: str, is_backup: bool, responsibility: dict | None, value: str) -> dict:
-    top_fields = [
-        {"type": "mrkdwn", "text": f":busts_in_silhouette: *Team*\n{team_name}"},
-        {"type": "mrkdwn", "text": f":bust_in_silhouette: *Role*\n{role}"},
-    ]
-    other_fields = [
-        {"type": "mrkdwn", "text": f":large_green_circle: *Primary*\n{primary_name or '—'}" if is_backup else f":large_orange_circle: *Backup*\n{backup_name or '—'}"},
-    ]
+    """
+    Rendered as a real image (sir's call -- same reasoning as the
+    Welcome banner, but here the content itself is different for every
+    person). cards/role_card_image.py draws sir's design (role name,
+    team, Primary/Backup box, responsibility, one box per phase) filled
+    in with THIS person's real data, in well under a second -- no AI
+    image generation, no 150 hand-made picture files, works for any
+    role.
+    """
+    from django.conf import settings
 
-    blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": ":clipboard: Your role assignment", "emoji": True}},
-        {"type": "section", "fields": top_fields},
-        {"type": "section", "fields": other_fields},
-        {"type": "divider"},
-    ]
-
-    if is_backup:
-        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ":large_orange_circle: If the primary can't respond, these are the activities you'd step in and run:"}]})
+    from .role_activities_v2 import activities_for_role
+    from .role_card_image import get_role_card_image_url
 
     # Real multi-row activity list for this role (sir's IR Team Catalog
-    # spreadsheet, Roles sheet) -- replaces the mockup's example table
-    # with the real activities this role actually owns, across every
-    # phase, not just a single auto-mapped action.
-    from .role_activities_v2 import activities_for_role
-
+    # spreadsheet, Roles sheet) -- the real activities this role
+    # actually owns, across every phase, not just a single auto-mapped
+    # action.
     activities = activities_for_role(catalog_team_id, role)
+    phase_activities: list[tuple[str, list[str]]] = []
+    real_responsibility = ""
     if activities:
         # Role Responsibilities column from the same spreadsheet row --
         # one text per role (repeats across that role's activity rows),
-        # shown once here rather than once per activity.
+        # used once here rather than once per activity.
         real_responsibility = activities[0].get("responsibility", "")
-        if real_responsibility:
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f":memo: *Responsibility*\n{real_responsibility}"}})
-            blocks.append({"type": "divider"})
-
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":clipboard: *Your IR Activities*"}})
-        # Slack Block Kit has no real table block -- a `fields` block
-        # (up to 10 fields = 5 two-column rows) is the closest real
-        # equivalent AND the cheapest on Slack's real hard 50-block-
-        # per-message cap -- one block per row (tried first) blew the
-        # Teams screen's version of this same table past that cap and
-        # silently broke every button on the card (confirmed live).
-        # Packing 5 rows per block avoids that here too.
-        table_fields = [{"type": "mrkdwn", "text": "*Activity*"}, {"type": "mrkdwn", "text": "*Phase*"}]
+        phases_seen: list[str] = []
+        by_phase: dict[str, list[str]] = {}
         for a in activities:
-            table_fields.append({"type": "mrkdwn", "text": a["activity"]})
-            table_fields.append({"type": "mrkdwn", "text": a["phase"]})
-        for i in range(0, len(table_fields), 10):
-            blocks.append({"type": "section", "fields": table_fields[i : i + 10]})
+            phase = a["phase"]
+            if phase not in by_phase:
+                by_phase[phase] = []
+                phases_seen.append(phase)
+            by_phase[phase].append(a["activity"])
+        phase_activities = [(phase, by_phase[phase]) for phase in phases_seen]
     elif responsibility:
-        blocks.append(
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f":memo: *Responsibility*\n{responsibility.get('text', '')}"},
-                    {"type": "mrkdwn", "text": f":zap: *Action*\n{responsibility.get('action', '')}: {responsibility.get('detail', '')}"},
-                    {"type": "mrkdwn", "text": f":calendar: *Test phase*\n{responsibility.get('phase', '')}"},
-                ],
-            }
-        )
+        real_responsibility = responsibility.get("text", "")
+        action_detail = f"{responsibility.get('action', '')}: {responsibility.get('detail', '')}".strip(": ")
+        phase = responsibility.get("phase", "")
+        if action_detail:
+            phase_activities = [(phase or "Your action", [action_detail])]
 
+    backup_role_label = "PRIMARY" if is_backup else "BACKUP"
+    backup_box_name = primary_name if is_backup else backup_name
+
+    image_url = get_role_card_image_url(
+        settings.BACKEND_URL, role, team_name, backup_role_label, backup_box_name or "", real_responsibility, phase_activities,
+    )
+
+    blocks = [
+        {"type": "image", "image_url": image_url, "alt_text": f"Your role: {role}"},
+    ]
+    if is_backup:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": ":large_orange_circle: If the primary can't respond, you'd step in and run these activities."}]})
     blocks.append({"type": "divider"})
     blocks.append(
         {
@@ -161,18 +153,29 @@ def build_role_card(catalog_team_id: str, team_name: str, role: str, primary_nam
 
 
 def build_ack_card(recipient_name: str, team_name: str, role: str, value: str) -> dict:
+    """
+    Rendered as a real image, same template-code approach as the
+    Welcome and Role cards -- the sentence's role/team mentions are
+    passed as highlighted chunks (cards/ack_card_image.py draws the
+    pink highlight + bold text behind them), and the person's real
+    name is drawn as the signature line at the bottom.
+    """
+    from django.conf import settings
+
+    from .ack_card_image import get_ack_card_image_url
+
+    sentence_parts = [
+        ("I understand my role as ", False),
+        (role, True),
+        (" on ", False),
+        (team_name, True),
+        (". I've reviewed my responsibilities and I'm ready to respond when a test fires.", False),
+    ]
+    image_url = get_ack_card_image_url(settings.BACKEND_URL, sentence_parts, recipient_name)
+
     return {
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": ":raised_hand: One last step", "emoji": True}},
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": f":busts_in_silhouette: {team_name}   ·   :bust_in_silhouette: {role}"}]},
-            {"type": "divider"},
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"I, *{recipient_name}*, confirm that I understand my role as *{role}* on *{team_name}*. I've reviewed my responsibilities and I'm ready to respond when a test fires.",
-                },
-            },
+            {"type": "image", "image_url": image_url, "alt_text": "One last step"},
             {"type": "divider"},
             {
                 "type": "actions",
@@ -232,18 +235,16 @@ def build_backup_activated_card(recipient_name: str, team_name: str, role: str, 
 
 
 def build_ack_done_card(acknowledged_at_text: str) -> dict:
-    return {
-        "blocks": [
-            {"type": "section", "text": {"type": "mrkdwn", "text": ":white_check_mark: *Acknowledged — you're all set*"}},
-            {"type": "divider"},
-            {
-                "type": "context",
-                "elements": [
-                    {"type": "mrkdwn", "text": f":clock3: Logged {acknowledged_at_text}. Your first task card will arrive here when the test fires."}
-                ],
-            },
-        ]
-    }
+    """Rendered as a real image, same template-code approach as the
+    other three cards in this flow -- almost entirely static (same
+    checkmark/heading/subtitle every time), only the logged timestamp
+    actually varies per person."""
+    from django.conf import settings
+
+    from .ack_done_card_image import get_ack_done_card_image_url
+
+    image_url = get_ack_done_card_image_url(settings.BACKEND_URL, acknowledged_at_text)
+    return {"blocks": [{"type": "image", "image_url": image_url, "alt_text": "You're all set"}]}
 
 
 def send_backup_activation_dm(recipient_slack_user_id: str, catalog_team_id: str, team_name: str, role: str, bot_token: str) -> bool:
@@ -380,29 +381,50 @@ def notify_module_owner_no_coverage(slack_team_id: str, team_name: str, role: st
         return False
 
 
-def send_welcome_dm(recipient_slack_user_id: str, catalog_team_id: str, team_name: str, role: str, is_backup: bool, bot_token: str) -> bool:
-    """No-op if there's no bot token -- not fatal either way. Returns
-    whether the DM actually went out, so callers can record real delivery
-    status (not just "we tried") for the admin to see."""
+def send_welcome_dm(
+    recipient_slack_user_id: str, catalog_team_id: str, team_name: str, role: str, is_backup: bool, bot_token: str,
+    existing_location: dict | None = None,
+) -> dict:
+    """
+    No-op if there's no bot token -- not fatal either way.
+
+    existing_location: {"channel_id", "message_ts"} of a Welcome DM
+    already sent to this exact person for this exact role (from
+    TeamMember.welcome_dm_location) -- when given, updates THAT same
+    message in place instead of posting a brand new one, so
+    re-assigning the same person (re-saving Configure Teams,
+    re-testing, ...) doesn't leave stale duplicate Welcome messages
+    stacked in their DM.
+
+    Returns {"ok", "channel_id", "message_ts"} so the caller can save
+    where this one landed for next time.
+    """
     if not (recipient_slack_user_id and bot_token):
-        return False
+        return {"ok": False, "channel_id": "", "message_ts": ""}
     try:
-        opened = _call("conversations.open", bot_token, users=recipient_slack_user_id)
-        dm_channel_id = opened["channel"]["id"]
         from .slack_members_v2 import get_workspace_people
 
         by_code = {p["i"]: p for p in get_workspace_people(bot_token)}
         recipient_name = by_code.get(recipient_slack_user_id, {}).get("n", "there")
 
         card = build_welcome_card(recipient_name, catalog_team_id, team_name, role, is_backup)
-        _call(
-            "chat.postMessage",
-            bot_token,
-            channel=dm_channel_id,
-            text=f"You've been added to {team_name} as {role}.",
-            **card,
-        )
-        return True
+
+        if existing_location and existing_location.get("channel_id") and existing_location.get("message_ts"):
+            dm_channel_id = existing_location["channel_id"]
+            message_ts = existing_location["message_ts"]
+            _call("chat.update", bot_token, channel=dm_channel_id, ts=message_ts, **card)
+        else:
+            opened = _call("conversations.open", bot_token, users=recipient_slack_user_id)
+            dm_channel_id = opened["channel"]["id"]
+            resp = _call(
+                "chat.postMessage",
+                bot_token,
+                channel=dm_channel_id,
+                text=f"You've been added to {team_name} as {role}.",
+                **card,
+            )
+            message_ts = resp.get("ts", "")
+        return {"ok": True, "channel_id": dm_channel_id, "message_ts": message_ts}
     except SlackApiError:
         logger.exception("Failed to send welcome DM to %s for %s / %s", recipient_slack_user_id, team_name, role)
-        return False
+        return {"ok": False, "channel_id": "", "message_ts": ""}

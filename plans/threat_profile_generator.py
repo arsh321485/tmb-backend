@@ -40,12 +40,16 @@ Company size: {company_size}
 Countries of operation: {countries}
 Regulations that apply: {regulations}
 
-List 6 to 10 realistic cybersecurity and privacy threats this specific organization should test \
-its incident response plan against, given its industry, sub-industry, size and the countries it \
-operates in. Prefer threats that are specific to this profile over generic ones -- e.g. a capital \
-markets firm in Saudi Arabia should see things like market-system compromise or SAMA/CMA \
-regulatory-notification failure, not just "external attacker". Each threat belongs to either the \
-"Cybersecurity" or "Privacy" module.
+List 6 to 10 realistic cybersecurity, privacy, and business-continuity threats this specific \
+organization should test its incident response plan against, given its industry, sub-industry, size \
+and the countries it operates in. Prefer threats that are specific to this profile over generic ones \
+-- e.g. a capital markets firm in Saudi Arabia should see things like market-system compromise or \
+SAMA/CMA regulatory-notification failure, not just "external attacker". Each threat belongs to the \
+"Cybersecurity", "Privacy", or "Business Continuity" module -- Business Continuity covers threats to \
+the organization's ability to keep operating at all (e.g. a key supplier/data-center outage, a \
+facility becoming unusable, a critical third-party service failing), not a cyberattack or a privacy \
+failure. Across the 6-10 threats, include at least one Business Continuity threat alongside the \
+Cybersecurity and Privacy ones -- don't skip it just because it's less common.
 
 For each threat, also rate it like a real risk matrix: how LIKELY it is to actually happen to this \
 organization, and how SEVERE the BUSINESS IMPACT would be if it did -- these are two separate \
@@ -65,7 +69,7 @@ Return a JSON object shaped exactly like this:
   "threats": [
     {{
       "key": "<short unique slug, e.g. market_system_compromise>",
-      "module": "Cybersecurity" | "Privacy",
+      "module": "Cybersecurity" | "Privacy" | "Business Continuity",
       "label": "<short threat name, e.g. Market-system compromise>",
       "why": "<one sentence, specific to THIS organization's industry/size/location, explaining why this threat applies to them>",
       "likelihood": "High" | "Medium-High" | "Medium" | "Low-Medium" | "Low",
@@ -133,7 +137,7 @@ def _parse_json_response(raw_text: str) -> list[dict] | None:
             continue
         key = (t.get("key") or "").strip().lower().replace(" ", "_")
         label = (t.get("label") or "").strip()
-        module = t.get("module") if t.get("module") in ("Cybersecurity", "Privacy") else "Cybersecurity"
+        module = t.get("module") if t.get("module") in ("Cybersecurity", "Privacy", "Business Continuity") else "Cybersecurity"
         why = (t.get("why") or "").strip()
         default_crit = t.get("default_crit") if t.get("default_crit") in ("Critical", "High", "Med") else "Med"
         likelihood = (t.get("likelihood") or "").strip() or "Medium"
@@ -145,7 +149,7 @@ def _parse_json_response(raw_text: str) -> list[dict] | None:
             {
                 "key": key,
                 "module": module,
-                "icon": ":shield:" if module == "Cybersecurity" else ":lock:",
+                "icon": {"Cybersecurity": ":shield:", "Privacy": ":lock:", "Business Continuity": ":arrows_counterclockwise:"}[module],
                 "label": label,
                 "why": why or f"Relevant to this organization's profile.",
                 "likelihood": likelihood,

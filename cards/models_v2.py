@@ -39,7 +39,7 @@ class AdminSetup(me.Document):
     # privacy/compliance scope. "plans_bia" isn't in this list: every org
     # needs someone owning the plan upload regardless of which modules
     # they picked.
-    selected_modules = me.ListField(me.StringField(), default=lambda: ["cyber", "privacy"])
+    selected_modules = me.ListField(me.StringField(), default=lambda: ["bc", "cyber", "privacy"])
 
     # Threat Profile card's drill-down position -- which Module/
     # Criticality/Threat/Incident/Cause/Phase/Scenario tab is currently
@@ -73,6 +73,13 @@ class AdminSetup(me.Document):
     # once per workspace the first time /testmyplan threats runs, reused
     # after that instead of creating a new channel every time.
     threats_center_channel_id = me.StringField(required=False)
+
+    # [slack_user_id, ...] -- who's already been proactively DMed the
+    # "Upload your BIA/BCP here" prompt (cards/bia_upload_v2_data.py),
+    # so clicking "Open DM with TestMyPlan" again doesn't re-send the
+    # same prompt into their DM every single time the Upload screen
+    # happens to redraw.
+    bia_upload_prompt_sent_to = me.ListField(me.StringField(), default=list)
 
     updated_at = me.DateTimeField(default=datetime.datetime.utcnow)
 
@@ -244,6 +251,16 @@ class TeamMember(me.Document):
     # been sent to this person, so the recurring check never re-sends the
     # same stage twice.
     reminders_sent = me.DictField(default=dict)
+
+    # {slack_user_id: {"channel_id", "message_ts"}} -- where this
+    # person's own Welcome DM landed, so re-assigning them to the same
+    # role (re-saving Configure Teams, re-testing, ...) updates THAT
+    # same message in place instead of posting a brand new one.
+    # Confirmed live: without this, every re-save fired a fresh welcome
+    # DM, leaving old ones stacked untouched in the channel while only
+    # the newest evolved through Role -> Acknowledge -- confusing
+    # stale duplicates.
+    welcome_dm_location = me.DictField(default=dict)
 
     # [slack_user_id, ...] -- who's already been reported to the People &
     # Roles owner as "left the workspace" for this role, so the recurring
