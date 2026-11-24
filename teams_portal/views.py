@@ -26,8 +26,13 @@ from workspaces.models import get_bot_token
 from .models import TeamsPortalOtp
 
 _SIGNER_SALT = "teams_portal.launch_token"
-_LAUNCH_TOKEN_MAX_AGE_SECONDS = 300  # 5 minutes -- just long enough to switch from Slack to the browser tab
-_OTP_TTL_SECONDS = 300
+# 15 minutes -- long enough to cover reading the Slack DM, typing the
+# code, AND at least one "Resend code" round trip (which re-uses this
+# same launch token) without the link itself going stale first.
+_LAUNCH_TOKEN_MAX_AGE_SECONDS = 900
+# 10 minutes -- real usage showed 5 was too tight once someone actually
+# has to switch to Slack, read the DM, and type 6 digits back in.
+_OTP_TTL_SECONDS = 600
 _OTP_MAX_ATTEMPTS = 5
 
 
@@ -88,7 +93,7 @@ def request_otp(request):
     otp.save()
 
     try:
-        send_dm_text(slack_user_id, f"Your TestMyPlan Teams code is *{code}* -- expires in 5 minutes.", bot_token)
+        send_dm_text(slack_user_id, f"Your TestMyPlan Teams code is *{code}* -- expires in 10 minutes.", bot_token)
     except SlackApiError:
         otp.delete()
         return Response({"error": "could_not_send_dm"}, status=502)
