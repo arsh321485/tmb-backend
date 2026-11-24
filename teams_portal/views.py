@@ -334,3 +334,43 @@ def remove_role_assignment(request, team_id, slack_user_id):
 
     TeamMember.objects(team=team, role=role).delete()
     return Response({"ok": True})
+
+
+@never_cache
+@api_view(["POST"])
+@_session_required
+def submit(request, team_id, slack_user_id):
+    """"Submit" -- every Save on this page already persists instantly
+    (same real TeamMember documents Slack reads), so this button's real
+    job is pushing a live refresh of the actual Slack Teams card to
+    match, instead of leaving it showing whatever it last had drawn
+    until someone happens to reopen/redraw it in Slack. Reuses the
+    exact same real card (cards/teams_v2_data.build_teams_card) and
+    chat.update path _redraw_teams itself uses."""
+    import requests
+
+    from cards import persistence_v2
+    from cards.nav_v2 import with_nav_bar_v2
+    from cards.teams_v2_data import build_teams_card
+
+    location = persistence_v2.load_teams_card_location(team_id)
+    if not (location.get("channel_id") and location.get("message_ts")):
+        # Nothing to refresh yet (e.g. Configure Teams has never been
+        # opened in this workspace) -- the real data is still saved,
+        # there's just no live Slack message to push it into.
+        return Response({"ok": True, "updated_in_slack": False})
+
+    bot_token = get_bot_token(team_id)
+    if not bot_token:
+        return Response({"ok": True, "updated_in_slack": False})
+
+    state = persistence_v2.load_teams_state(team_id)
+    people = get_workspace_people(bot_token)
+    card = with_nav_bar_v2(build_teams_card(state, people, slack_team_id=team_id), "teams")
+    resp = requests.post(
+        "https://slack.com/api/chat.update",
+        headers={"Authorization": f"Bearer {bot_token}"},
+        json={"channel": location["channel_id"], "ts": location["message_ts"], **card},
+        timeout=10,
+    ).json()
+    return Response({"ok": True, "updated_in_slack": bool(resp.get("ok"))})
