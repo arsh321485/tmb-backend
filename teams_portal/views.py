@@ -278,3 +278,39 @@ def set_role_assignment(request, team_id, slack_user_id):
             )
 
     return Response({"ok": True})
+
+
+@never_cache
+@api_view(["POST"])
+@_session_required
+def apply_same_user(request, team_id, slack_user_id):
+    """"Apply same user to other teams" -- moved here from the Slack
+    Teams card per sir's call. Reuses the exact same real mutation +
+    notification logic that button used to run
+    (cards/team_copy_modal_v2.py), just invoked from the website
+    instead of a Slack modal submission."""
+    from cards.team_copy_modal_v2 import apply_to_other_teams, send_notify_dms
+
+    source_slug = (request.data.get("source_team_slug") or "").strip()
+    source_role = (request.data.get("source_role") or "").strip()
+    target_slugs = list(request.data.get("target_team_slugs") or [])
+
+    if not (source_slug and source_role and target_slugs):
+        return Response({"error": "missing_fields"}, status=400)
+    if not find_team(source_slug):
+        return Response({"error": "team_not_found"}, status=404)
+
+    bot_token = get_bot_token(team_id)
+    if not bot_token:
+        return Response({"error": "workspace_not_installed"}, status=400)
+
+    newly_filled = apply_to_other_teams(team_id, source_slug, source_role, target_slugs, bot_token)
+    if newly_filled:
+        import threading
+
+        threading.Thread(target=send_notify_dms, args=(team_id, newly_filled, bot_token), daemon=True).start()
+
+    return Response({
+        "ok": True,
+        "filled": [{"team_slug": t, "role": r} for t, r, *_ in newly_filled],
+    })

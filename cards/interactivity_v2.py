@@ -1387,17 +1387,6 @@ def handle_block_action_v2(payload: dict) -> None:
         _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
-    if action_id == "v2_team_copy_open":
-        from . import team_copy_modal_v2
-
-        source_team_id = action.get("value", "")
-        trigger_id = payload.get("trigger_id", "")
-        channel_id = payload.get("channel", {}).get("id", "")
-        message_ts = payload.get("message", {}).get("ts", "")
-        if trigger_id and channel_id and bot_token and source_team_id:
-            team_copy_modal_v2.open_modal(trigger_id, source_team_id, channel_id, message_ts, bot_token, slack_team_id=slack_team_id)
-        return
-
     if action_id == "v2_team_add_cancel":
         state = read_teams_state(message_blocks)
         state["add"] = None
