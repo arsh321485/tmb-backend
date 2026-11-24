@@ -72,6 +72,17 @@ CORS_ALLOWED_ORIGINS = config(
 )
 CORS_ALLOW_CREDENTIALS = True
 
+# django-cors-headers' own default allow-list, plus the one extra header
+# the Teams-portal frontend sends on every request to skip ngrok's free-
+# tier browser-warning interstitial (that page has no CORS headers at
+# all, which is what every earlier "missing Access-Control-Allow-Origin"
+# error actually was) -- without explicitly allowing it here, the
+# browser's preflight itself rejects the header before any request can
+# even be sent.
+from corsheaders.defaults import default_headers
+
+CORS_ALLOW_HEADERS = list(default_headers) + ["ngrok-skip-browser-warning"]
+
 # teams_portal's OTP session cookie has to survive a cross-origin fetch
 # (website origin != this backend's origin) -- the browser only sends a
 # cookie cross-site at all when it's SameSite=None, and SameSite=None is
