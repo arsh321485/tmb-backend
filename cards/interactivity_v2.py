@@ -1045,22 +1045,23 @@ def handle_block_action_v2(payload: dict) -> None:
         # Signs a short-lived launch token from the real team_id + the
         # real clicking user's slack_user_id Slack just handed us on this
         # very click (teams_portal/views.py verifies this token server
-        # side before ever DMing an OTP) -- posted back as an EPHEMERAL
-        # message (response_type="ephemeral", no replace_original) so the
-        # real Teams card in the channel is untouched, only the clicker
-        # sees the link.
+        # side before ever DMing an OTP) -- sent as a real DM (not an
+        # in-channel ephemeral reply) per sir's call, so Command Center
+        # doesn't show this click to anyone, including the clicker --
+        # it just lands in their own DM with the bot instead.
         from django.conf import settings
 
         from teams_portal.views import make_launch_token
 
-        if response_url and slack_team_id and current_user_id:
+        if slack_team_id and current_user_id and bot_token:
             launch_token = make_launch_token(slack_team_id, current_user_id)
             portal_url = f"{settings.FRONTEND_URL}/teams-portal?token={launch_token}"
             requests.post(
-                response_url,
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {bot_token}"},
                 json={
-                    "response_type": "ephemeral",
-                    "replace_original": False,
+                    "channel": current_user_id,
+                    "text": "Open Teams on website",
                     "blocks": [
                         {
                             "type": "section",
