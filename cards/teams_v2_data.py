@@ -595,20 +595,14 @@ def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list
     dm_statuses = dm_statuses or {}
     acknowledged = acknowledged or set()
 
-    if primary_id and backup_id:
-        status = ":white_check_mark: Done"
-    elif primary_id:
-        status = ":large_blue_circle: Primary set — needs a backup"
-    else:
-        status = ":hourglass_flowing_sand: Pending"
-
-    # Real delivery/acknowledgment status (Primary/Backup "Card sent"/
-    # "Acknowledged" tags) moved to the website's own role detail --
-    # the Slack side only needs Role + Done/Pending status now.
+    # Per-role Done/Pending status, and the Primary/Backup "Card sent"/
+    # "Acknowledged" tags, both moved to the website's own role detail --
+    # the Slack side now just lists the role name (the team-level
+    # overall Complete/Pending status above the role list still stays).
 
     role_header = {
         "type": "section",
-        "text": {"type": "mrkdwn", "text": f"*{role}*   {status}"},
+        "text": {"type": "mrkdwn", "text": f"*{role}*"},
     }
 
     blocks = [
