@@ -28,10 +28,9 @@ from workspaces.models import get_bot_token
 from .models import TeamsPortalOtp
 
 _SIGNER_SALT = "teams_portal.launch_token"
-# 15 minutes -- long enough to cover reading the Slack DM, typing the
-# code, AND at least one "Resend code" round trip (which re-uses this
-# same launch token) without the link itself going stale first.
-_LAUNCH_TOKEN_MAX_AGE_SECONDS = 900
+# 30 minutes -- sir's call: gives real room to get to it later, not
+# just handle it immediately after clicking in Slack.
+_LAUNCH_TOKEN_MAX_AGE_SECONDS = 1800
 # 10 minutes -- real usage showed 5 was too tight once someone actually
 # has to switch to Slack, read the DM, and type 6 digits back in.
 _OTP_TTL_SECONDS = 600
