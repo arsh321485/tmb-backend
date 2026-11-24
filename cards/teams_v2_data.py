@@ -602,22 +602,9 @@ def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list
     else:
         status = ":hourglass_flowing_sand: Pending"
 
-    # Real delivery + acknowledgment status for whoever's assigned --
-    # acknowledged (they opened the card and confirmed) takes priority
-    # over just "sent" (it reached them but they may not have read it).
-    def _dm_tag(uid, label):
-        if not uid:
-            return ""
-        if uid in acknowledged:
-            return f"*{label}*  :white_check_mark: Acknowledged"
-        dm_status = dm_statuses.get(uid)
-        if dm_status == "sent":
-            return f"*{label}*  :incoming_envelope: Card sent"
-        if dm_status == "failed":
-            return f"*{label}*  :warning: Failed to send"
-        return ""
-
-    dm_tags = [t for t in (_dm_tag(primary_id, "Primary"), _dm_tag(backup_id, "Backup")) if t]
+    # Real delivery/acknowledgment status (Primary/Backup "Card sent"/
+    # "Acknowledged" tags) moved to the website's own role detail --
+    # the Slack side only needs Role + Done/Pending status now.
 
     role_header = {
         "type": "section",
@@ -628,8 +615,6 @@ def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list
         {"type": "context", "elements": [{"type": "mrkdwn", "text": "`ROLE`"}]},
         role_header,
     ]
-    if dm_tags:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "    ".join(dm_tags)}})
 
     # Responsibility + the Activity/Phase table moved to the website's
     # own role detail (teams_portal's get_teams + its role-block UI) --
