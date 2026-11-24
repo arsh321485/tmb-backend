@@ -586,25 +586,6 @@ def _team_is_staffed(team_id: str, members: list) -> bool:
     return bool(filled_roles)
 
 
-def _info_fields_block(team: dict) -> list:
-    return [
-        {
-            "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": f"*Purpose*\n{team['purpose']}"},
-                {"type": "mrkdwn", "text": f"*Primary IR phases*\n{team['phases']}"},
-            ],
-        },
-        {
-            "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": f"*Team type*\n{team['type']}"},
-                {"type": "mrkdwn", "text": f"*Can be outsourced*\n{team['outsource']}"},
-            ],
-        },
-    ]
-
-
 def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list, by_code: dict, dm_statuses: dict | None = None, acknowledged: set | None = None) -> list:
     role = role_entry["role"]
     priority = role_entry["priority"]
@@ -650,31 +631,11 @@ def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list
     if dm_tags:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "    ".join(dm_tags)}})
 
-    from .role_activities_v2 import activities_for_role
-
-    activities = activities_for_role(team_id, role)
-    if activities:
-        responsibility = activities[0].get("responsibility", "")
-        if responsibility:
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Responsibility*\n{responsibility}"}})
-        # Slack Block Kit has no real table block -- a `fields` section
-        # is the closest real equivalent. A real bug (confirmed live):
-        # one block per activity row blew this card past Slack's real
-        # hard 50-block-per-message cap once more than one role's
-        # activities were on screen -- Slack silently rejects the whole
-        # update when that happens, which made every button on the
-        # card look dead (the redraw never actually went through). A
-        # `fields` block holds up to 10 fields (5 two-column rows), so
-        # packing 5 rows per block instead of 1 keeps the same aligned
-        # Activity/Phase table look at a fraction of the block cost.
-        table_fields = [{"type": "mrkdwn", "text": "*Activity*"}, {"type": "mrkdwn", "text": "*Phase*"}]
-        for a in activities:
-            table_fields.append({"type": "mrkdwn", "text": a["activity"]})
-            table_fields.append({"type": "mrkdwn", "text": a["phase"]})
-        for i in range(0, len(table_fields), 10):
-            blocks.append({"type": "section", "fields": table_fields[i : i + 10]})
-    else:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "_No catalog activities on file for this role._"}})
+    # Responsibility + the Activity/Phase table moved to the website's
+    # own role detail (teams_portal's get_teams + its role-block UI) --
+    # the Slack side only needs Role/Primary/Backup/sent-or-acknowledged
+    # now, not the full reference detail too (also trims real block
+    # count, helping stay under Slack's 50-block-per-message cap).
 
     member_options = [{"text": {"type": "plain_text", "text": p["n"]}, "value": p["i"]} for p in people]
     if not member_options:
@@ -740,6 +701,10 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
     is_done = _team_is_staffed(team_id, members)
     status_text = ":white_check_mark: *Complete*" if is_done else ":hourglass_flowing_sand: *Pending*"
 
+    # Purpose/Primary IR phases/Team type/Can be outsourced moved to the
+    # website's own team card (teams_portal's get_teams + its info-fields
+    # UI) -- sir's call: the Slack side only needs Role/Primary/Backup/
+    # sent-or-acknowledged now, not the full reference detail too.
     blocks = [
         {
             "type": "section",
@@ -747,7 +712,6 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
             "text": {"type": "mrkdwn", "text": f"*{team['name']}*\n`{team['tier']}`  ·  `{team['type']}`"},
         },
         {"type": "section", "text": {"type": "mrkdwn", "text": status_text}},
-        *_info_fields_block(team),
     ]
 
     catalog = roles_for_team(team_id)
