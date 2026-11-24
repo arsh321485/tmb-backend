@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from cards.models_v2 import Team, TeamMember
 from cards.slack_client import SlackApiError, send_dm_text
 from cards.slack_members_v2 import get_workspace_people
-from cards.team_catalog_v2 import roles_for_team
+from cards.team_catalog_v2 import ALL_TEAMS, find_team, roles_for_team
 from workspaces.models import get_bot_token
 
 from .models import TeamsPortalOtp
@@ -146,28 +146,35 @@ def get_members(request, team_id, slack_user_id):
 @api_view(["GET"])
 @_session_required
 def get_teams(request, team_id, slack_user_id):
-    """Every real Team + its TeamMember rows for this workspace -- the
-    exact documents cards/teams_v2_data.py's Teams card reads, so this
-    is always in sync with Slack, not a separate copy of the data."""
+    """Every real team from the catalog (ALL_TEAMS, same 35 teams/4 tiers
+    the Slack Teams card itself lists) + its TeamMember rows for this
+    workspace -- a Team document only exists once that team's row has
+    actually been touched/saved (persistence_v2.save_teams_state), so
+    iterating ALL_TEAMS rather than only Team.objects() here means a
+    team nobody has opened in Slack yet still shows up on the website,
+    same fix as roles_for_team already needed below."""
+    existing_teams_by_slug = {t.slug: t for t in Team.objects(team_id=team_id)}
+
     teams = []
-    for team in Team.objects(team_id=team_id):
-        # The real role list for this team always comes from the catalog
-        # (team_catalog_v2.roles_for_team), same as the Slack Teams card
-        # itself -- a TeamMember document only exists once someone has
-        # actually been assigned, so a never-touched team would otherwise
-        # show zero rows (nothing to click "Primary"/"Backup" on at all).
-        existing_by_role = {m.role: m for m in TeamMember.objects(team=team)}
+    for catalog_team in ALL_TEAMS:
+        slug = catalog_team["id"]
+        team_doc = existing_teams_by_slug.get(slug)
+        existing_by_role = {m.role: m for m in TeamMember.objects(team=team_doc)} if team_doc else {}
         members = [
             {
                 "role": role["role"],
                 "primary_slack_user_ids": list(existing_by_role[role["role"]].primary_slack_user_ids) if role["role"] in existing_by_role else [],
                 "backup_slack_user_ids": list(existing_by_role[role["role"]].backup_slack_user_ids) if role["role"] in existing_by_role else [],
             }
-            for role in roles_for_team(team.slug)
+            for role in roles_for_team(slug)
         ]
         teams.append({
-            "id": str(team.id), "module": team.module, "slug": team.slug,
-            "name": team.name, "is_mandatory": team.is_mandatory, "members": members,
+            "id": str(team_doc.id) if team_doc else "",
+            "slug": slug,
+            "tier": catalog_team["tier"],
+            "name": catalog_team["name"],
+            "is_mandatory": catalog_team["tier"] == "Mandatory",
+            "members": members,
         })
     return Response({"teams": teams})
 
@@ -178,18 +185,32 @@ def get_teams(request, team_id, slack_user_id):
 def set_role_assignment(request, team_id, slack_user_id):
     """Writes real Primary/Backup picks for one role -- the exact
     TeamMember fields the Slack Teams card reads, so a submission here
-    shows up there the very next time that card renders, no sync step."""
-    doc_team_id = (request.data.get("team_doc_id") or "").strip()
+    shows up there the very next time that card renders, no sync step.
+
+    Looked up by team_slug (the catalog id, e.g. "T07"), not a Team
+    document id -- get_teams now lists every catalog team even ones
+    that have no Team document yet, so this creates it on first save
+    here, same lazy-creation persistence_v2.save_teams_state already
+    does for the Slack side."""
+    slug = (request.data.get("team_slug") or "").strip()
     role = (request.data.get("role") or "").strip()
     primary_slack_user_ids = list(request.data.get("primary_slack_user_ids") or [])
     backup_slack_user_ids = list(request.data.get("backup_slack_user_ids") or [])
 
-    team = Team.objects(id=doc_team_id, team_id=team_id).first()
-    if not team:
+    catalog_team = find_team(slug)
+    if not catalog_team:
         return Response({"error": "team_not_found"}, status=404)
 
-    if role not in {r["role"] for r in roles_for_team(team.slug)}:
+    if role not in {r["role"] for r in roles_for_team(slug)}:
         return Response({"error": "role_not_found"}, status=404)
+
+    team = Team.objects(team_id=team_id, slug=slug).first()
+    if not team:
+        team = Team(
+            team_id=team_id, module=catalog_team["tier"], slug=slug,
+            name=catalog_team["name"], is_mandatory=catalog_team["tier"] == "Mandatory",
+        )
+        team.save()
 
     # First real assignment for this role creates its TeamMember row --
     # it only exists once someone's actually been picked (same lazy
