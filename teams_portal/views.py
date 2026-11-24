@@ -160,9 +160,15 @@ def get_teams(request, team_id, slack_user_id):
         slug = catalog_team["id"]
         team_doc = existing_teams_by_slug.get(slug)
         existing_by_role = {m.role: m for m in TeamMember.objects(team=team_doc)} if team_doc else {}
+        # priority included so the website can split roles into the
+        # same Mandatory/Recommended/Optional sub-tabs the Slack Teams
+        # card itself shows (cards/teams_v2_data.py's _team_block) --
+        # without it, a role Slack tucks under a "Recommended roles"
+        # tab (not shown by default) looked "missing" on the website.
         members = [
             {
                 "role": role["role"],
+                "priority": role["priority"],
                 "primary_slack_user_ids": list(existing_by_role[role["role"]].primary_slack_user_ids) if role["role"] in existing_by_role else [],
                 "backup_slack_user_ids": list(existing_by_role[role["role"]].backup_slack_user_ids) if role["role"] in existing_by_role else [],
             }
