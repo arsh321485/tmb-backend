@@ -19,6 +19,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from cards.models_v2 import Team, TeamMember
+from cards.role_activities_v2 import activities_for_role
 from cards.slack_client import SlackApiError, send_dm_text
 from cards.slack_members_v2 import get_workspace_people
 from cards.team_catalog_v2 import ALL_TEAMS, find_team, roles_for_team
@@ -165,15 +166,35 @@ def get_teams(request, team_id, slack_user_id):
         # card itself shows (cards/teams_v2_data.py's _team_block) --
         # without it, a role Slack tucks under a "Recommended roles"
         # tab (not shown by default) looked "missing" on the website.
-        members = [
-            {
-                "role": role["role"],
+        members = []
+        for role in roles_for_team(slug):
+            role_name = role["role"]
+            tm = existing_by_role.get(role_name)
+            activities = activities_for_role(slug, role_name)
+            primary_ids = list(tm.primary_slack_user_ids) if tm else []
+            backup_ids = list(tm.backup_slack_user_ids) if tm else []
+            dm_status = dict(tm.dm_status) if tm and tm.dm_status else {}
+            acknowledged = set((tm.acknowledged_by or {}).keys()) if tm else set()
+            members.append({
+                "role": role_name,
                 "priority": role["priority"],
-                "primary_slack_user_ids": list(existing_by_role[role["role"]].primary_slack_user_ids) if role["role"] in existing_by_role else [],
-                "backup_slack_user_ids": list(existing_by_role[role["role"]].backup_slack_user_ids) if role["role"] in existing_by_role else [],
-            }
-            for role in roles_for_team(slug)
-        ]
+                "primary_slack_user_ids": primary_ids,
+                "backup_slack_user_ids": backup_ids,
+                # Same real delivery/ack status the Slack Teams card's
+                # own _dm_tag shows -- "acknowledged" (they opened the
+                # card and confirmed) always wins over just "sent"
+                # (it reached them but they may not have read it yet).
+                "primary_status": (
+                    "acknowledged" if primary_ids and primary_ids[0] in acknowledged
+                    else dm_status.get(primary_ids[0]) if primary_ids else None
+                ),
+                "backup_status": (
+                    "acknowledged" if backup_ids and backup_ids[0] in acknowledged
+                    else dm_status.get(backup_ids[0]) if backup_ids else None
+                ),
+                "responsibility": activities[0]["responsibility"] if activities else "",
+                "activities": [{"activity": a["activity"], "phase": a["phase"]} for a in activities],
+            })
         teams.append({
             "id": str(team_doc.id) if team_doc else "",
             "slug": slug,
