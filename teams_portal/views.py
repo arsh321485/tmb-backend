@@ -180,6 +180,13 @@ def get_teams(request, team_id, slack_user_id):
             "tier": catalog_team["tier"],
             "name": catalog_team["name"],
             "is_mandatory": catalog_team["tier"] == "Mandatory",
+            # Same real catalog fields the Slack Teams card's own
+            # _info_fields_block shows (purpose/phases/type/outsource) --
+            # nothing invented, straight from ALL_TEAMS.
+            "purpose": catalog_team.get("purpose", ""),
+            "phases": catalog_team.get("phases", ""),
+            "type": catalog_team.get("type", ""),
+            "outsource": catalog_team.get("outsource", ""),
             "members": members,
         })
     return Response({"teams": teams})
