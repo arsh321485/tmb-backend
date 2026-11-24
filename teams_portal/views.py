@@ -229,4 +229,24 @@ def set_role_assignment(request, team_id, slack_user_id):
     member.primary_slack_user_ids = primary_slack_user_ids
     member.backup_slack_user_ids = backup_slack_user_ids
     member.save()
+
+    # Same real Welcome -> Role -> Acknowledge DM flow a Slack-side save
+    # already sends (team_assignment_notify_v2.send_team_assignment_dm)
+    # -- without this, someone assigned from the website would be
+    # staffed in the data but never actually told, unlike Slack.
+    if primary_slack_user_ids:
+        from cards.team_assignment_notify_v2 import send_team_assignment_dm
+        from cards.team_catalog_v2 import default_responsibility_for
+
+        bot_token = get_bot_token(team_id)
+        if bot_token:
+            people = get_workspace_people(bot_token)
+            by_code = {p["i"]: p for p in people}
+            responsibility = default_responsibility_for(slug, role)
+            send_team_assignment_dm(
+                team_id, catalog_team["name"], role,
+                primary_slack_user_ids[0], backup_slack_user_ids[0] if backup_slack_user_ids else "",
+                responsibility, by_code, bot_token, catalog_team_id=slug,
+            )
+
     return Response({"ok": True})
