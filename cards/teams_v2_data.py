@@ -680,36 +680,46 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
 
     catalog = roles_for_team(team_id)
     if catalog:
-        present_priorities = [p for p in ("Mandatory", "Recommended", "Optional") if any(r["priority"] == p for r in catalog)]
+        # Only roles that actually have a primary assigned -- sir's
+        # call: once assignment happens on the website, Slack's job is
+        # showing the real current roster, not every still-open catalog
+        # slot (those are the website's job now, via teams_portal).
+        assigned_roles = {m["role"] for m in members if m.get("primary")}
+        assigned_catalog = [r for r in catalog if r["role"] in assigned_roles]
+
+        present_priorities = [p for p in ("Mandatory", "Recommended", "Optional") if any(r["priority"] == p for r in assigned_catalog)]
         if active_priority not in present_priorities:
             active_priority = present_priorities[0] if present_priorities else None
 
-        if len(present_priorities) > 1:
-            blocks.append(
-                {
-                    "type": "actions",
-                    "block_id": f"teampriority|{team_id}|{active_priority or ''}",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": f"{p} roles ({sum(1 for r in catalog if r['priority'] == p)})", "emoji": True},
-                            "action_id": f"v2_team_priority_tab__{team_id}__{p}",
-                            "value": p,
-                            **({"style": "primary"} if p == active_priority else {}),
-                        }
-                        for p in present_priorities
-                    ],
-                }
-            )
+        if not assigned_catalog:
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No roles assigned yet -- use \"Assign on website\" above._"}]})
+        else:
+            if len(present_priorities) > 1:
+                blocks.append(
+                    {
+                        "type": "actions",
+                        "block_id": f"teampriority|{team_id}|{active_priority or ''}",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": f"{p} roles ({sum(1 for r in assigned_catalog if r['priority'] == p)})", "emoji": True},
+                                "action_id": f"v2_team_priority_tab__{team_id}__{p}",
+                                "value": p,
+                                **({"style": "primary"} if p == active_priority else {}),
+                            }
+                            for p in present_priorities
+                        ],
+                    }
+                )
 
-        blocks.append({"type": "divider"})
-        dm_statuses_by_role = dm_statuses_by_role or {}
-        acknowledgments = acknowledgments or {}
-        for role_entry in [r for r in catalog if r["priority"] == active_priority]:
-            role_dm_statuses = dm_statuses_by_role.get((team_id, role_entry["role"]), {})
-            acked = acknowledgments.get((team_id, role_entry["role"]), set())
-            blocks.extend(_role_row_blocks(team_id, role_entry, members, people, by_code, role_dm_statuses, acked))
             blocks.append({"type": "divider"})
+            dm_statuses_by_role = dm_statuses_by_role or {}
+            acknowledgments = acknowledgments or {}
+            for role_entry in [r for r in assigned_catalog if r["priority"] == active_priority]:
+                role_dm_statuses = dm_statuses_by_role.get((team_id, role_entry["role"]), {})
+                acked = acknowledgments.get((team_id, role_entry["role"]), set())
+                blocks.extend(_role_row_blocks(team_id, role_entry, members, people, by_code, role_dm_statuses, acked))
+                blocks.append({"type": "divider"})
 
     # Any member not in the catalog (free-typed custom role) -- shown
     # below the catalog table, same as before.
