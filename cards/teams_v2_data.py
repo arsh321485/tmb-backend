@@ -665,20 +665,17 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
     from .team_catalog_v2 import roles_for_team
 
     team_id = team["id"]
-    is_done = _team_is_staffed(team_id, members)
-    status_text = ":white_check_mark: *Complete*" if is_done else ":hourglass_flowing_sand: *Pending*"
 
-    # Purpose/Primary IR phases/Team type/Can be outsourced moved to the
-    # website's own team card (teams_portal's get_teams + its info-fields
-    # UI) -- sir's call: the Slack side only needs Role/Primary/Backup/
-    # sent-or-acknowledged now, not the full reference detail too.
+    # Purpose/Primary IR phases/Team type/Can be outsourced, and the
+    # Complete/Pending status, all moved to the website's own team card
+    # (teams_portal's get_teams + its info-fields/status-badge UI) --
+    # the Slack side now just shows the team name/tier/type here.
     blocks = [
         {
             "type": "section",
             "block_id": f"teamheader|{team_id}",
             "text": {"type": "mrkdwn", "text": f"*{team['name']}*\n`{team['tier']}`  ·  `{team['type']}`"},
         },
-        {"type": "section", "text": {"type": "mrkdwn", "text": status_text}},
     ]
 
     catalog = roles_for_team(team_id)
@@ -779,7 +776,6 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
                 "text": "Assign members to IR teams from the TestMyPlan catalog. Mandatory teams must be staffed before you can continue.",
             },
         },
-        {"type": "section", "text": {"type": "mrkdwn", "text": ":white_check_mark: *Complete*   ·   :hourglass_flowing_sand: *Pending*"}},
     ]
 
     if slack_team_id:
@@ -871,7 +867,7 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
                 "type": "button",
                 "text": {
                     "type": "plain_text",
-                    "text": f"{':white_check_mark:' if _team_is_staffed(t['id'], teams.get(t['id'], [])) else ':hourglass_flowing_sand:'} {_short_team_name(t['name'])}"[:75],
+                    "text": _short_team_name(t["name"])[:75],
                     "emoji": True,
                 },
                 "action_id": f"v2_team_expand_toggle__{t['id']}",
