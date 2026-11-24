@@ -664,23 +664,11 @@ def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list
     if backup_id and backup_id in by_code and backup_id != primary_id:
         backup_accessory["initial_option"] = {"text": {"type": "plain_text", "text": by_code[backup_id]["n"]}, "value": backup_id}
 
+    # "Remove" (clear Primary/Backup) moved to the website's Teams portal
+    # per sir's call, same reasoning as the other buttons trimmed from
+    # this card -- real removal still works the exact same way
+    # (teams_portal.remove_role_assignment), just from the website now.
     pick_elements = [primary_accessory, backup_accessory]
-    if primary_id or backup_id:
-        pick_elements.append(
-            {
-                "type": "button",
-                "text": {"type": "plain_text", "text": "✕ Remove", "emoji": True},
-                "action_id": "v2_team_role_remove",
-                "value": f"{team_id}|{role}",
-                "style": "danger",
-                "confirm": {
-                    "title": {"type": "plain_text", "text": "Remove this assignment?"},
-                    "text": {"type": "mrkdwn", "text": f"This clears Primary and Backup for *{role}*. You'll need to reassign both."},
-                    "confirm": {"type": "plain_text", "text": "Remove"},
-                    "deny": {"type": "plain_text", "text": "Cancel"},
-                },
-            }
-        )
 
     blocks.append(
         {

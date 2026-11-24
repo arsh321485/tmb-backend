@@ -314,3 +314,23 @@ def apply_same_user(request, team_id, slack_user_id):
         "ok": True,
         "filled": [{"team_slug": t, "role": r} for t, r, *_ in newly_filled],
     })
+
+
+@never_cache
+@api_view(["POST"])
+@_session_required
+def remove_role_assignment(request, team_id, slack_user_id):
+    """"Remove" (clears Primary + Backup for one role) -- moved here
+    from the Slack Teams card per sir's call. Same real effect as
+    v2_team_role_remove: the TeamMember row for this role is deleted
+    outright, not just emptied, so the next GET (and the Slack card,
+    reading the same data) shows it as never-assigned again."""
+    slug = (request.data.get("team_slug") or "").strip()
+    role = (request.data.get("role") or "").strip()
+
+    team = Team.objects(team_id=team_id, slug=slug).first()
+    if not team:
+        return Response({"error": "team_not_found"}, status=404)
+
+    TeamMember.objects(team=team, role=role).delete()
+    return Response({"ok": True})
