@@ -14,6 +14,7 @@ import secrets
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.core import signing
+from django.views.decorators.cache import never_cache
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
@@ -68,6 +69,7 @@ def _session_required(view_func):
     return wrapper
 
 
+@never_cache
 @api_view(["POST"])
 def request_otp(request):
     """Step 1: website lands with ?token=... from the Slack button, posts
@@ -101,6 +103,7 @@ def request_otp(request):
     return Response({"otp_id": str(otp.id)})
 
 
+@never_cache
 @api_view(["POST"])
 def verify_otp(request):
     """Step 2: website posts {otp_id, code}. On a real match, starts a
@@ -128,6 +131,7 @@ def verify_otp(request):
     return Response({"ok": True, "team_id": otp.team_id})
 
 
+@never_cache
 @api_view(["GET"])
 @_session_required
 def get_members(request, team_id, slack_user_id):
@@ -138,6 +142,7 @@ def get_members(request, team_id, slack_user_id):
     return Response({"members": people})
 
 
+@never_cache
 @api_view(["GET"])
 @_session_required
 def get_teams(request, team_id, slack_user_id):
@@ -167,6 +172,7 @@ def get_teams(request, team_id, slack_user_id):
     return Response({"teams": teams})
 
 
+@never_cache
 @api_view(["POST"])
 @_session_required
 def set_role_assignment(request, team_id, slack_user_id):
