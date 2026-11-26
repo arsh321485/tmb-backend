@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "workspaces",
     "cards",
     "teams_portal",
+    "scenario_portal",
 ]
 
 MIDDLEWARE = [

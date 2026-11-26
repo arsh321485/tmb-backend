@@ -28,9 +28,11 @@ from workspaces.models import get_bot_token
 from .models import TeamsPortalOtp
 
 _SIGNER_SALT = "teams_portal.launch_token"
-# 30 minutes -- sir's call: gives real room to get to it later, not
-# just handle it immediately after clicking in Slack.
-_LAUNCH_TOKEN_MAX_AGE_SECONDS = 1800
+# 24 hours -- raised from 30 minutes: the OTP step right after this is
+# the real identity check (code DMed to the real Slack user), so a long
+# window here just avoids the link going stale before someone gets to
+# it, without actually weakening security.
+_LAUNCH_TOKEN_MAX_AGE_SECONDS = 86400
 # 10 minutes -- real usage showed 5 was too tight once someone actually
 # has to switch to Slack, read the DM, and type 6 digits back in.
 _OTP_TTL_SECONDS = 600
@@ -253,6 +255,7 @@ def set_role_assignment(request, team_id, slack_user_id):
     if not member:
         member = TeamMember(team=team, role=role)
 
+    previous_pair = (list(member.primary_slack_user_ids or []), list(member.backup_slack_user_ids or []))
     member.primary_slack_user_ids = primary_slack_user_ids
     member.backup_slack_user_ids = backup_slack_user_ids
     member.save()
@@ -261,7 +264,15 @@ def set_role_assignment(request, team_id, slack_user_id):
     # already sends (team_assignment_notify_v2.send_team_assignment_dm)
     # -- without this, someone assigned from the website would be
     # staffed in the data but never actually told, unlike Slack.
-    if primary_slack_user_ids:
+    #
+    # Only once BOTH Primary and Backup are actually picked, and only
+    # when something about that pair really changed -- the website's
+    # Primary and Backup pickers each save independently (one request
+    # per dropdown), so without this, picking Primary (save #1, backup
+    # still empty) then picking Backup (save #2) used to send the same
+    # person this DM twice for one real assignment.
+    current_pair = (primary_slack_user_ids, backup_slack_user_ids)
+    if primary_slack_user_ids and backup_slack_user_ids and current_pair != previous_pair:
         from cards.team_assignment_notify_v2 import send_team_assignment_dm
         from cards.team_catalog_v2 import default_responsibility_for
 

@@ -274,9 +274,13 @@ def check_scheduled_ai_runs() -> int:
 
     from workspaces.models import get_bot_token
 
+    from .checks_workspace_filter import checks_enabled_for
+
     fired = 0
     due = AIExerciseRun.objects(status=RUN_STATUS_SCHEDULED, scheduled_at__lte=datetime.datetime.utcnow())
     for run in due:
+        if not checks_enabled_for(run.team_id):
+            continue
         bot_token = get_bot_token(run.team_id)
         if not bot_token:
             continue
@@ -578,18 +582,21 @@ def escalate_overdue_ai_decisions() -> int:
     chain continue rather than hanging the drill forever. Meant to be
     called on a recurring timer (see exercises/apps.py).
     """
+    from .checks_workspace_filter import checks_enabled_for
     from workspaces.models import get_bot_token
 
     overdue = AIDecisionResponse.objects(chosen_option=None, escalated=False, due_at__lt=datetime.datetime.utcnow())
 
     count = 0
     for response in overdue:
-        response.escalated = True
-        response.save()
-
         run = response.run
         if not run or run.status != RUN_STATUS_RUNNING:
             continue
+        if not checks_enabled_for(run.team_id):
+            continue
+
+        response.escalated = True
+        response.save()
 
         bot_token = get_bot_token(run.team_id)
         if not bot_token:

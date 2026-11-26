@@ -676,7 +676,13 @@ def handle_block_action_v2(payload: dict) -> None:
 
         combined = get_or_generate_incident_scenario(slack_team_id, module, threat_key, incident_id, causes) if causes else None
 
-        if combined:
+        if combined == "missing_plan_or_roles":
+            card = build_org_threats_card(threats_state, team_id=slack_team_id)
+            card["blocks"].append({
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "_Couldn't write a scenario -- this team doesn't have a real plan (services) or roles set up yet. Add those first, then try again._"}],
+            })
+        elif combined:
             from .scenario_v2_data import build_scenario_review_card
 
             scenario_breadcrumb = "  ›  ".join(
@@ -687,7 +693,7 @@ def handle_block_action_v2(payload: dict) -> None:
             card = build_org_threats_card(threats_state, team_id=slack_team_id)
             card["blocks"].append({
                 "type": "context",
-                "elements": [{"type": "mrkdwn", "text": "_Couldn't write a scenario for this incident -- this can happen when the AI provider is briefly overloaded, not just when a plan/roles are missing. Try again._"}],
+                "elements": [{"type": "mrkdwn", "text": "_Couldn't write a scenario for this incident -- this can happen when the AI provider is briefly overloaded. Try again._"}],
             })
         _replace_message(response_url, with_nav_bar_v2(card, "org_threats"), bot_token, top_channel_id, top_message_ts)
         return
@@ -1060,7 +1066,7 @@ def handle_block_action_v2(payload: dict) -> None:
                 "https://slack.com/api/chat.postMessage",
                 headers={"Authorization": f"Bearer {bot_token}"},
                 json={
-                    "channel": current_user_id,
+                    "channel": top_channel_id,
                     "text": "Open Teams on website",
                     "blocks": [
                         {
@@ -1086,6 +1092,17 @@ def handle_block_action_v2(payload: dict) -> None:
         _, team_id, priority = action_id.split("__", 2)
         state["expanded_team"] = team_id
         state["active_priority"] = priority
+        state["active_role_page"] = 1
+        _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
+        return
+
+    if action_id.startswith("v2_team_role_page_prev__") or action_id.startswith("v2_team_role_page_next__"):
+        state = read_teams_state(message_blocks)
+        saved = persistence_v2.load_teams_state(slack_team_id)
+        state["teams"], state["resp"] = saved["teams"], saved["resp"]
+        current_page = int(action.get("value") or "1")
+        delta = -1 if action_id.startswith("v2_team_role_page_prev__") else 1
+        state["active_role_page"] = max(1, current_page + delta)
         _redraw_teams(response_url, bot_token, state, slack_team_id, top_channel_id, top_message_ts)
         return
 
@@ -1693,6 +1710,43 @@ def handle_block_action_v2(payload: dict) -> None:
         breadcrumb = f"{doc.threat_label}  ›  {doc.incident_name}  ›  {doc.cause_name}"
         if response_url:
             _replace_message(response_url, with_nav_bar_v2(build_scenario_review_card(doc, breadcrumb, active_phase=_CONSEQUENCES_TAB, consequences_page=page), "org_threats"))
+        return
+
+    if action_id == "v2_scenario_open_portal":
+        # Same real launch-token -> Slack-DM-OTP pattern as
+        # v2_teams_open_portal, just scoped to one scenario instead of a
+        # team's whole roster -- so phases/injects/decisions (too small
+        # to read in the Slack card) can be reviewed properly on the
+        # website, with the approval posted back into this same channel.
+        from django.conf import settings
+
+        from scenario_portal.views import make_launch_token
+
+        scenario_doc_id = action.get("value", "")
+        if slack_team_id and current_user_id and bot_token and scenario_doc_id:
+            launch_token = make_launch_token(slack_team_id, current_user_id, scenario_doc_id, top_channel_id or "")
+            portal_url = f"{settings.FRONTEND_URL}/scenario-portal?token={launch_token}"
+            requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                json={
+                    "channel": top_channel_id,
+                    "text": "Open scenario on website",
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": "Opens for you only -- we'll DM you a code to confirm it's really you."},
+                            "accessory": {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": "Open scenario on website", "emoji": True},
+                                "url": portal_url,
+                                "style": "primary",
+                            },
+                        },
+                    ],
+                },
+                timeout=10,
+            )
         return
 
     if action_id == "v2_scenario_approve":

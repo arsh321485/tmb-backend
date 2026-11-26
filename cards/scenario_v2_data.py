@@ -102,7 +102,20 @@ def build_scenario_review_card(scenario_doc, breadcrumb: str, active_phase: str 
     # call, live feedback) instead of below the image/context block --
     # built first so with_nav_bar_v2's prepended nav bar is immediately
     # followed by these, not by a whole screen's worth of content first.
-    blocks = []
+    blocks = [
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "🔗 View on testmyplan.ai", "emoji": True},
+                    "action_id": "v2_scenario_open_portal",
+                    "value": doc_id,
+                },
+            ],
+        },
+        {"type": "section", "text": {"type": "mrkdwn", "text": "*Too small to read here -- tap above for the full view.*"}},
+    ]
     if phases_present or scenario_doc.consequence_injects:
         tab_elements = [
             {

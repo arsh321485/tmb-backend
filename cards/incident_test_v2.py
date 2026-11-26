@@ -117,6 +117,10 @@ def get_or_generate_incident_scenario(
         team_id, threat_label, incident_name, combined_cause_text, FULL_LIFECYCLE_PHASES,
         total_target=total_target, min_target=min_target,
     )
+    if result and result.get("error") == "missing_plan_or_roles":
+        logger.warning("Incident test: no real plan/roles for incident %s", incident_id)
+        return "missing_plan_or_roles"
+
     if not result or not result.get("injects"):
         logger.warning("Incident test: couldn't write a combined scenario for incident %s", incident_id)
         return None

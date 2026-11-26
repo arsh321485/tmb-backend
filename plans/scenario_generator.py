@@ -186,7 +186,7 @@ def generate_scenario(
 
     if not services or not roles:
         logger.warning("No real plan services or roles for team %s -- skipping scenario generation", team_id)
-        return None
+        return {"error": "missing_plan_or_roles"}
 
     services_block = "\n".join(
         f"- {s.get('name', '?')} (RTO {s.get('rto', 'unknown')}, RPO {s.get('rpo', 'unknown')})" for s in services[:10]

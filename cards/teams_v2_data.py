@@ -14,6 +14,7 @@ is always free-typed via a modal (cards/team_role_modal_v2.py) -- with
 realistic, so this keeps every team fully functional without one.
 """
 
+from .role_assignment_card_image import get_team_roles_card_image_url, role_pages
 from .team_catalog_v2 import ALL_TEAMS, MANDATORY_TEAM_IDS, TIERS, TIER_EMOJI, find_team, teams_in_tier
 
 ADD_CUSTOM_ROLE_VALUE = "__add_custom__"
@@ -122,6 +123,7 @@ def read_current_state(message_blocks: list) -> dict:
     active_tier = "Mandatory"
     expanded_team = None
     active_priority = None
+    active_role_page = 1
 
     for block in message_blocks or []:
         block_id = block.get("block_id", "")
@@ -139,6 +141,10 @@ def read_current_state(message_blocks: list) -> dict:
         elif block_id.startswith("teampriority|"):
             _, _team_id, priority = block_id.split("|", 2)
             active_priority = priority or None
+
+        elif block_id.startswith("teamrolepage|"):
+            _, _team_id, page = block_id.split("|", 2)
+            active_role_page = int(page) if page.isdigit() else 1
 
         elif block_id.startswith("teamrolepick|"):
             _, team_id, role = block_id.split("|", 2)
@@ -230,7 +236,7 @@ def read_current_state(message_blocks: list) -> dict:
     return {
         "teams": teams, "resp": resp, "add": add, "map": map_state,
         "dm_open": dm_open, "active_tier": active_tier, "expanded_team": expanded_team,
-        "active_priority": active_priority,
+        "active_priority": active_priority, "active_role_page": active_role_page,
     }
 
 
@@ -586,80 +592,7 @@ def _team_is_staffed(team_id: str, members: list) -> bool:
     return bool(filled_roles)
 
 
-def _role_row_blocks(team_id: str, role_entry: dict, members: list, people: list, by_code: dict, dm_statuses: dict | None = None, acknowledged: set | None = None) -> list:
-    role = role_entry["role"]
-    priority = role_entry["priority"]
-    existing = next((m for m in members if m["role"] == role), None)
-    primary_id = existing["primary"][0] if existing and existing.get("primary") else None
-    backup_id = existing["backup"][0] if existing and existing.get("backup") else None
-    dm_statuses = dm_statuses or {}
-    acknowledged = acknowledged or set()
-
-    # Per-role Done/Pending status, and the Primary/Backup "Card sent"/
-    # "Acknowledged" tags, both moved to the website's own role detail --
-    # the Slack side now just lists the role name (the team-level
-    # overall Complete/Pending status above the role list still stays).
-
-    role_header = {
-        "type": "section",
-        "text": {"type": "mrkdwn", "text": f"*{role}*"},
-    }
-
-    blocks = [
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": "`ROLE`"}]},
-        role_header,
-    ]
-
-    # Responsibility + the Activity/Phase table moved to the website's
-    # own role detail (teams_portal's get_teams + its role-block UI) --
-    # the Slack side only needs Role/Primary/Backup/sent-or-acknowledged
-    # now, not the full reference detail too (also trims real block
-    # count, helping stay under Slack's 50-block-per-message cap).
-
-    member_options = [{"text": {"type": "plain_text", "text": p["n"]}, "value": p["i"]} for p in people]
-    if not member_options:
-        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No one in this workspace to assign yet._"}]})
-        return blocks
-
-    primary_accessory = {
-        "type": "static_select",
-        "action_id": "v2_team_role_primary_select",
-        "options": member_options,
-        "placeholder": {"type": "plain_text", "text": "Primary member…"},
-    }
-    if primary_id and primary_id in by_code:
-        primary_accessory["initial_option"] = {"text": {"type": "plain_text", "text": by_code[primary_id]["n"]}, "value": primary_id}
-
-    backup_candidates = [p for p in people if p["i"] != primary_id]
-    backup_options = [{"text": {"type": "plain_text", "text": p["n"]}, "value": p["i"]} for p in backup_candidates] or [
-        {"text": {"type": "plain_text", "text": "No one else available"}, "value": "__none__"}
-    ]
-    backup_accessory = {
-        "type": "static_select",
-        "action_id": "v2_team_role_backup_select",
-        "options": backup_options,
-        "placeholder": {"type": "plain_text", "text": "Backup member…"},
-    }
-    if backup_id and backup_id in by_code and backup_id != primary_id:
-        backup_accessory["initial_option"] = {"text": {"type": "plain_text", "text": by_code[backup_id]["n"]}, "value": backup_id}
-
-    # "Remove" (clear Primary/Backup) moved to the website's Teams portal
-    # per sir's call, same reasoning as the other buttons trimmed from
-    # this card -- real removal still works the exact same way
-    # (teams_portal.remove_role_assignment), just from the website now.
-    pick_elements = [primary_accessory, backup_accessory]
-
-    blocks.append(
-        {
-            "type": "actions",
-            "block_id": f"teamrolepick|{team_id}|{role}",
-            "elements": pick_elements,
-        }
-    )
-    return blocks
-
-
-def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, map_state: dict | None, people: list, by_code: dict, expanded: bool, dm_open: set | None = None, active_priority: str | None = None, dm_statuses_by_role: dict | None = None, acknowledgments: dict | None = None) -> list:
+def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, map_state: dict | None, people: list, by_code: dict, expanded: bool, dm_open: set | None = None, active_priority: str | None = None, dm_statuses_by_role: dict | None = None, acknowledgments: dict | None = None, active_role_page: int = 1) -> list:
     """Full detail panel for the one team currently selected via the team
     tab row (build_teams_card only ever calls this for that one team)."""
     from .team_catalog_v2 import roles_for_team
@@ -674,7 +607,7 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
         {
             "type": "section",
             "block_id": f"teamheader|{team_id}",
-            "text": {"type": "mrkdwn", "text": f"*{team['name']}*\n`{team['tier']}`  ·  `{team['type']}`"},
+            "text": {"type": "mrkdwn", "text": f"*{team['name']}*"},
         },
     ]
 
@@ -692,7 +625,7 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
             active_priority = present_priorities[0] if present_priorities else None
 
         if not assigned_catalog:
-            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No roles assigned yet -- use \"Assign on website\" above._"}]})
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*No roles assigned yet -- click the \"Assign on testmyplan​.ai\" button above to get started.*"}})
         else:
             if len(present_priorities) > 1:
                 blocks.append(
@@ -712,13 +645,50 @@ def _team_block(team: dict, members: list, resp_mapped: list, add: dict | None, 
                     }
                 )
 
-            blocks.append({"type": "divider"})
-            dm_statuses_by_role = dm_statuses_by_role or {}
-            acknowledgments = acknowledgments or {}
-            for role_entry in [r for r in assigned_catalog if r["priority"] == active_priority]:
-                role_dm_statuses = dm_statuses_by_role.get((team_id, role_entry["role"]), {})
-                acked = acknowledgments.get((team_id, role_entry["role"]), set())
-                blocks.extend(_role_row_blocks(team_id, role_entry, members, people, by_code, role_dm_statuses, acked))
+            tab_roles = [r for r in assigned_catalog if r["priority"] == active_priority]
+            role_rows = []
+            for role_entry in tab_roles:
+                role = role_entry["role"]
+                existing = next((m for m in members if m["role"] == role), None)
+                primary_id = existing["primary"][0] if existing and existing.get("primary") else None
+                backup_id = existing["backup"][0] if existing and existing.get("backup") else None
+                primary_name = by_code.get(primary_id, {}).get("n", "") if primary_id else ""
+                backup_name = by_code.get(backup_id, {}).get("n", "") if backup_id else ""
+                role_rows.append((role, primary_name, backup_name))
+
+            pages = role_pages(role_rows)
+            total_pages = len(pages)
+            page = min(max(1, active_role_page), total_pages) if total_pages else 1
+
+            if pages:
+                from django.conf import settings
+
+                image_url = get_team_roles_card_image_url(settings.BACKEND_URL, team["name"], pages[page - 1], page, total_pages)
+                blocks.append({
+                    "type": "image", "image_url": image_url,
+                    "alt_text": f"{team['name']} -- roles page {page} of {total_pages}",
+                })
+
+                if total_pages > 1:
+                    blocks.append({
+                        "type": "actions",
+                        "block_id": f"teamrolepage|{team_id}|{page}",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": "◀ Back", "emoji": True},
+                                "action_id": f"v2_team_role_page_prev__{team_id}",
+                                "value": str(page),
+                                **({} if page > 1 else {"style": "danger"}),
+                            },
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": "Next ▶", "emoji": True},
+                                "action_id": f"v2_team_role_page_next__{team_id}",
+                                "value": str(page),
+                            },
+                        ],
+                    })
                 blocks.append({"type": "divider"})
 
     # Any member not in the catalog (free-typed custom role) -- shown
@@ -759,6 +729,7 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
     active_tier = state.get("active_tier") or "Mandatory"
     expanded_team = state.get("expanded_team")
     active_priority = state.get("active_priority")
+    active_role_page = state.get("active_role_page") or 1
     by_code = {p["i"]: p for p in people}
 
     staffed = sum(1 for tid in MANDATORY_TEAM_IDS if _team_is_staffed(tid, teams.get(tid, [])))
@@ -795,13 +766,14 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": ":link: Assign on website", "emoji": True},
+                        "text": {"type": "plain_text", "text": ":link: Assign on testmyplan.ai", "emoji": True},
                         "action_id": "v2_teams_open_portal",
                         "value": slack_team_id,
                     }
                 ],
             }
         )
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Tough to do here, easy on this link*"}})
 
     if slack_team_id:
         from plans.resilience_gaps import suggested_teams_and_roles
@@ -852,26 +824,6 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
             }
         )
 
-        # Jump straight to any team across every tier -- with 35 teams
-        # total, clicking through tabs tier by tier to find one specific
-        # team is slow.
-        blocks.append(
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "static_select",
-                        "action_id": "v2_team_jump_select",
-                        "placeholder": {"type": "plain_text", "text": "Jump to a team…"},
-                        "options": [
-                            {"text": {"type": "plain_text", "text": _short_team_name(t["name"])[:75]}, "value": t["id"]}
-                            for t in ALL_TEAMS
-                        ],
-                    }
-                ],
-            }
-        )
-
         team_tab_elements = [
             {
                 "type": "button",
@@ -898,7 +850,7 @@ def build_teams_card(state: dict, people: list, slack_team_id: str = "") -> dict
         blocks.extend(
             _team_block(
                 selected_team, teams.get(selected_team["id"], []), resp.get(selected_team["id"], []), add, map_state,
-                people, by_code, True, dm_open, active_priority, dm_statuses_by_role, acknowledgments,
+                people, by_code, True, dm_open, active_priority, dm_statuses_by_role, acknowledgments, active_role_page,
             )
         )
 

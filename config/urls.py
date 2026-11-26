@@ -27,6 +27,7 @@ urlpatterns = [
     path("api/events/", include("home_tab.urls")),
     path("api/interactivity/", include("cards.urls")),
     path("api/teams-portal/", include("teams_portal.urls")),
+    path("api/scenario-portal/", include("scenario_portal.urls")),
     # Real public URLs for images referenced from Slack cards (e.g. the
     # Welcome banner, and the per-role card images rendered on the fly
     # under static_assets/generated/) -- Slack fetches these itself, so

@@ -9,6 +9,7 @@ project).
 import datetime
 import logging
 
+from .checks_workspace_filter import checks_enabled_for
 from .models_v2 import Team, TeamMember
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,9 @@ def check_backup_timeout_activation() -> int:
         if not isinstance(team_doc, Team):
             team_doc = Team.objects(id=tm.team.id).first()
         if not team_doc:
+            continue
+
+        if not checks_enabled_for(team_doc.team_id):
             continue
 
         bot_token = get_bot_token(team_doc.team_id)
@@ -124,6 +128,9 @@ def check_role_reminders() -> int:
         if not team_doc:
             continue
 
+        if not checks_enabled_for(team_doc.team_id):
+            continue
+
         bot_token = get_bot_token(team_doc.team_id)
         if not bot_token:
             continue
@@ -176,6 +183,9 @@ def check_leavers() -> int:
     team_ids = Team.objects().distinct("team_id")
 
     for slack_team_id in team_ids:
+        if not checks_enabled_for(slack_team_id):
+            continue
+
         bot_token = get_bot_token(slack_team_id)
         if not bot_token:
             continue
