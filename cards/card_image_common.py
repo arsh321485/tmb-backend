@@ -13,9 +13,9 @@ STATIC_ASSETS_DIR = Path(__file__).parent / "static_assets"
 GENERATED_DIR = STATIC_ASSETS_DIR / "generated"
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
-_FONT_DIR = Path("C:/Windows/Fonts")
-_REGULAR_FONT = "arial.ttf"
-_BOLD_FONT = "arialbd.ttf"
+_FONT_DIR = Path(__file__).parent / "static_assets" / "fonts"
+_REGULAR_FONT = "LiberationSans-Regular.ttf"
+_BOLD_FONT = "LiberationSans-Bold.ttf"
 
 BG = (250, 248, 245)
 INK = (17, 24, 28)
