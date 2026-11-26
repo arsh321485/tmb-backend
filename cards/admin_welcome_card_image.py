@@ -19,7 +19,7 @@ from .card_image_common import (
 
 # Bump this whenever render_admin_welcome_card_image's drawing changes
 # -- see get_admin_welcome_card_image_url's cache-key comment below.
-_TEMPLATE_VERSION = "v7"
+_TEMPLATE_VERSION = "v8"
 
 _STEPS = [
     ("01", "Select modules", "Cybersecurity, Privacy and more"),
